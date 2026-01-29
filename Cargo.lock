@@ -10950,6 +10950,7 @@ dependencies = [
  "vortex-error",
  "vortex-mask",
  "vortex-scalar",
+ "vortex-sequence",
  "vortex-session",
 ]
 
