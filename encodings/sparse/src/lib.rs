@@ -53,9 +53,14 @@ use vortex_scalar::ScalarValue;
 
 use crate::canonical::canonicalize_sparse;
 
+#[cfg(feature = "arbitrary")]
+mod arbitrary;
 mod canonical;
 mod compute;
 mod ops;
+
+#[cfg(feature = "arbitrary")]
+pub use arbitrary::ArbitrarySparseArray;
 
 vtable!(Sparse);
 
