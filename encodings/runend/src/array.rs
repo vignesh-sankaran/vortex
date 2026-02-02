@@ -39,9 +39,9 @@ use vortex_error::vortex_ensure;
 use vortex_error::vortex_panic;
 use vortex_scalar::PValue;
 
-use crate::compress::runend_decode_bools;
 use crate::compress::runend_decode_primitive;
 use crate::compress::runend_encode;
+use crate::decompress_bool::runend_decode_bools;
 use crate::kernel::PARENT_KERNELS;
 use crate::rules::RULES;
 

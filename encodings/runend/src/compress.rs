@@ -186,8 +186,6 @@ pub fn runend_decode_primitive(
     }))
 }
 
-pub use crate::decompress_bool::runend_decode_bools;
-
 pub fn runend_decode_typed_primitive<T: NativePType>(
     run_ends: impl Iterator<Item = usize>,
     values: &[T],
