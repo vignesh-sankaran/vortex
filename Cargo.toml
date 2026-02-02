@@ -367,3 +367,18 @@ lto = false
 [profile.bench_assert]
 debug-assertions = true
 inherits = "bench"
+
+[patch.crates-io]
+datafusion = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-catalog = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-common = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-common-runtime = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-datasource = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-execution = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-expr = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-functions = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-physical-expr = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-physical-expr-adapter = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-physical-expr-common = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-physical-plan = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }
+datafusion-pruning = { git = "https://github.com/adamgs/arrow-datafusion", branch = "adamg/optimize-phyiscal-expr-simplifier" }

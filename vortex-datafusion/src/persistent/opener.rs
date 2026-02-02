@@ -172,8 +172,9 @@ impl FileOpener for VortexOpener {
                 .with_metrics(metrics.clone());
 
             if let Some(file_metadata_cache) = file_metadata_cache
-                && let Some(file_metadata) = file_metadata_cache.get(&file.object_meta)
+                && let Some(file_metadata) = file_metadata_cache.get(&file.object_meta.location)
                 && let Some(vortex_metadata) = file_metadata
+                    .file_metadata
                     .as_any()
                     .downcast_ref::<CachedVortexMetadata>()
             {
@@ -197,7 +198,7 @@ impl FileOpener for VortexOpener {
             let expr_adapter = expr_adapter_factory.create(
                 Arc::clone(&unified_file_schema),
                 Arc::clone(&this_file_schema),
-            );
+            )?;
 
             let simplifier = PhysicalExprSimplifier::new(&this_file_schema);
 

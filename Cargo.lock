@@ -2436,8 +2436,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d12ee9fdc6cdb5898c7691bb994f0ba606c4acc93a2258d78bb9f26ff8158bb3"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "arrow-schema 57.2.0",
@@ -2477,7 +2476,7 @@ dependencies = [
  "parquet 57.2.0",
  "rand 0.9.2",
  "regex",
- "sqlparser 0.59.0",
+ "sqlparser 0.60.0",
  "tempfile",
  "tokio",
  "url",
@@ -2538,8 +2537,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "462dc9ef45e5d688aeaae49a7e310587e81b6016b9d03bace5626ad0043e5a9e"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2586,8 +2584,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog-listing"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b96dbf1d728fc321817b744eb5080cdd75312faa6980b338817f68f3caa4208"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2632,8 +2629,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3237a6ff0d2149af4631290074289cae548c9863c885d821315d54c6673a074a"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "ahash 0.8.12",
  "arrow 57.2.0",
@@ -2642,12 +2638,13 @@ dependencies = [
  "half",
  "hashbrown 0.16.1",
  "indexmap",
+ "itertools 0.14.0",
  "libc",
  "log",
  "object_store",
  "parquet 57.2.0",
  "paste",
- "sqlparser 0.59.0",
+ "sqlparser 0.60.0",
  "tokio",
  "web-time",
 ]
@@ -2666,8 +2663,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70b5e34026af55a1bfccb1ef0a763cf1f64e77c696ffcf5a128a278c31236528"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "futures",
  "log",
@@ -2706,8 +2702,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b2a6be734cc3785e18bbf2a7f2b22537f6b9fb960d79617775a51568c281842"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2735,8 +2730,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-arrow"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1739b9b07c9236389e09c74f770e88aff7055250774e9def7d3f4f56b3dcc7be"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "arrow-ipc 57.2.0",
@@ -2784,8 +2778,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-csv"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c73bc54b518bbba7c7650299d07d58730293cfba4356f6f428cc94c20b7600"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2832,8 +2825,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-json"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37812c8494c698c4d889374ecfabbff780f1f26d9ec095dd1bddfc2a8ca12559"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2854,8 +2846,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-parquet"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2210937ecd9f0e824c397e73f4b5385c97cd1aff43ab2b5836fcfd2d321523fb"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2890,8 +2881,7 @@ checksum = "99ee6b1d9a80d13f9deb2291f45c07044b8e62fb540dbde2453a18be17a36429"
 [[package]]
 name = "datafusion-doc"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c825f969126bc2ef6a6a02d94b3c07abff871acf4d6dd759ce1255edb7923ce"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 
 [[package]]
 name = "datafusion-execution"
@@ -2916,8 +2906,7 @@ dependencies = [
 [[package]]
 name = "datafusion-execution"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa03ef05a2c2f90dd6c743e3e111078e322f4b395d20d4b4d431a245d79521ae"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2925,6 +2914,7 @@ dependencies = [
  "dashmap",
  "datafusion-common 52.1.0",
  "datafusion-expr 52.1.0",
+ "datafusion-physical-expr-common 52.1.0",
  "futures",
  "log",
  "object_store",
@@ -2958,8 +2948,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef33934c1f98ee695cc51192cc5f9ed3a8febee84fdbcd9131bf9d3a9a78276f"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -2974,7 +2963,7 @@ dependencies = [
  "itertools 0.14.0",
  "paste",
  "serde_json",
- "sqlparser 0.59.0",
+ "sqlparser 0.60.0",
 ]
 
 [[package]]
@@ -2993,8 +2982,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr-common"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "000c98206e3dd47d2939a94b6c67af4bfa6732dd668ac4fafdbde408fd9134ea"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "datafusion-common 52.1.0",
@@ -3035,8 +3023,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "379b01418ab95ca947014066248c22139fe9af9289354de10b445bd000d5d276"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "arrow-buffer 57.2.0",
@@ -3083,8 +3070,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd00d5454ba4c3f8ebbd04bd6a6a9dc7ced7c56d883f70f2076c188be8459e4c"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "ahash 0.8.12",
  "arrow 57.2.0",
@@ -3117,8 +3103,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate-common"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aec06b380729a87210a4e11f555ec2d729a328142253f8d557b87593622ecc9f"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "ahash 0.8.12",
  "arrow 57.2.0",
@@ -3152,8 +3137,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-nested"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "904f48d45e0f1eb7d0eb5c0f80f2b5c6046a85454364a6b16a2e0b46f62e7dff"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "arrow-ord 57.2.0",
@@ -3191,8 +3175,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-table"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9a0d20e2b887e11bee24f7734d780a2588b925796ac741c3118dd06d5aa77f0"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "async-trait",
@@ -3225,8 +3208,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3414b0a07e39b6979fe3a69c7aa79a9f1369f1d5c8e52146e66058be1b285ee"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "datafusion-common 52.1.0",
@@ -3253,8 +3235,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window-common"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bf2feae63cd4754e31add64ce75cae07d015bce4bb41cd09872f93add32523a"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "datafusion-common 52.1.0",
  "datafusion-physical-expr-common 52.1.0",
@@ -3274,8 +3255,7 @@ dependencies = [
 [[package]]
 name = "datafusion-macros"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4fe888aeb6a095c4bcbe8ac1874c4b9a4c7ffa2ba849db7922683ba20875aaf"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "datafusion-doc 52.1.0",
  "quote",
@@ -3304,8 +3284,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a6527c063ae305c11be397a86d8193936f4b84d137fe40bd706dfc178cf733c"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "chrono",
@@ -3346,8 +3325,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bb028323dd4efd049dd8a78d78fe81b2b969447b39c51424167f973ac5811d9"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "ahash 0.8.12",
  "arrow 57.2.0",
@@ -3384,8 +3362,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-adapter"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78fe0826aef7eab6b4b61533d811234a7a9e5e458331ebbf94152a51fc8ab433"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "datafusion-common 52.1.0",
@@ -3413,8 +3390,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfccd388620734c661bd8b7ca93c44cdd59fecc9b550eea416a78ffcbb29475f"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "ahash 0.8.12",
  "arrow 57.2.0",
@@ -3449,8 +3425,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-optimizer"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde5fa10e73259a03b705d5fddc136516814ab5f441b939525618a4070f5a059"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "datafusion-common 52.1.0",
@@ -3498,8 +3473,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e1098760fb29127c24cc9ade3277051dc73c9ed0ac0131bd7bcd742e0ad7470"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "ahash 0.8.12",
  "arrow 57.2.0",
@@ -3521,6 +3495,7 @@ dependencies = [
  "indexmap",
  "itertools 0.14.0",
  "log",
+ "num-traits",
  "parking_lot",
  "pin-project-lite",
  "tokio",
@@ -3547,8 +3522,7 @@ dependencies = [
 [[package]]
 name = "datafusion-pruning"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d0fef4201777b52951edec086c21a5b246f3c82621569ddb4a26f488bc38a9"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "datafusion-common 52.1.0",
@@ -3588,8 +3562,7 @@ dependencies = [
 [[package]]
 name = "datafusion-session"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f71f1e39e8f2acbf1c63b0e93756c2e970a64729dab70ac789587d6237c4fde0"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "async-trait",
  "datafusion-common 52.1.0",
@@ -3618,18 +3591,18 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "52.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f44693cfcaeb7a9f12d71d1c576c3a6dc025a12cef209375fa2d16fb3b5670ee"
+source = "git+https://github.com/adamgs/arrow-datafusion?branch=adamg%2Foptimize-phyiscal-expr-simplifier#19991785851752facc64acf58538be761ab1cf5a"
 dependencies = [
  "arrow 57.2.0",
  "bigdecimal",
  "chrono",
  "datafusion-common 52.1.0",
  "datafusion-expr 52.1.0",
+ "datafusion-functions-nested 52.1.0",
  "indexmap",
  "log",
  "regex",
- "sqlparser 0.59.0",
+ "sqlparser 0.60.0",
 ]
 
 [[package]]
@@ -8933,17 +8906,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec4b661c54b1e4b603b37873a18c59920e4c51ea8ea2cf527d925424dbd4437c"
 dependencies = [
  "log",
- "sqlparser_derive",
+ "sqlparser_derive 0.3.0",
 ]
 
 [[package]]
 name = "sqlparser"
-version = "0.59.0"
+version = "0.60.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4591acadbcf52f0af60eafbb2c003232b2b4cd8de5f0e9437cb8b1b59046cc0f"
+checksum = "505aa16b045c4c1375bf5f125cce3813d0176325bfe9ffc4a903f423de7774ff"
 dependencies = [
  "log",
- "sqlparser_derive",
+ "sqlparser_derive 0.4.0",
 ]
 
 [[package]]
@@ -8951,6 +8924,17 @@ name = "sqlparser_derive"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da5fc6819faabb412da764b99d3b713bb55083c11e7e0c00144d386cd6a1939c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
+name = "sqlparser_derive"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "028e551d5e270b31b9f3ea271778d9d827148d4287a5d96167b6bb9787f5cc38"
 dependencies = [
  "proc-macro2",
  "quote",
