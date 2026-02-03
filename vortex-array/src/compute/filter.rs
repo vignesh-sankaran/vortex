@@ -236,6 +236,10 @@ impl dyn Array + '_ {
             vortex_bail!("mask must be bool array, has dtype {}", self.dtype());
         }
 
+        if !self.dtype().is_nullable() && self.is_canonical() {
+            return Ok(Mask::from_buffer(self.to_bool().to_bit_buffer()));
+        }
+
         // Convert nulls to false first in case this can be done cheaply by the encoding.
         let array = fill_null(self, &Scalar::bool(false, self.dtype().nullability()))?;
 
