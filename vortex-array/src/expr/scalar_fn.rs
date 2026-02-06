@@ -13,7 +13,6 @@ use vortex_dtype::DType;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_utils::debug_with::DebugWith;
-use vortex_vector::Datum;
 
 use crate::ArrayRef;
 use crate::expr::EmptyOptions;
@@ -117,14 +116,6 @@ impl ScalarFn {
             .return_dtype(self.options.deref(), arg_types)
     }
 
-    /// Evaluate the expression, returning an ArrayRef.
-    ///
-    /// NOTE: this function will soon be deprecated as all expressions will evaluate trivially
-    ///  into an ExprArray.
-    pub fn evaluate(&self, expr: &Expression, scope: &ArrayRef) -> VortexResult<ArrayRef> {
-        self.vtable.as_dyn().evaluate(expr, scope)
-    }
-
     /// Transforms the expression into one representing the validity of this expression.
     pub fn validity(&self, expr: &Expression) -> VortexResult<Expression> {
         Ok(self.vtable.as_dyn().validity(expr)?.unwrap_or_else(|| {
@@ -138,7 +129,7 @@ impl ScalarFn {
     }
 
     /// Execute the expression given the input arguments.
-    pub fn execute(&self, ctx: ExecutionArgs) -> VortexResult<Datum> {
+    pub fn execute(&self, ctx: ExecutionArgs) -> VortexResult<ArrayRef> {
         self.vtable.as_dyn().execute(self.options.deref(), ctx)
     }
 

@@ -12,14 +12,11 @@ use vortex_dtype::arrow::FromArrowType;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
-use vortex_error::vortex_panic;
-use vortex_mask::Mask;
 use vortex_scalar::Scalar;
 
 use crate::ArrayBufferVisitor;
 use crate::ArrayChildVisitor;
 use crate::ArrayRef;
-use crate::Canonical;
 use crate::EmptyMetadata;
 use crate::ExecutionCtx;
 use crate::IntoArray;
@@ -34,7 +31,6 @@ use crate::validity::Validity;
 use crate::vtable;
 use crate::vtable::ArrayId;
 use crate::vtable::BaseArrayVTable;
-use crate::vtable::NotSupported;
 use crate::vtable::OperationsVTable;
 use crate::vtable::VTable;
 use crate::vtable::ValidityVTable;
@@ -51,7 +47,6 @@ impl VTable for ArrowVTable {
     type OperationsVTable = Self;
     type ValidityVTable = Self;
     type VisitorVTable = Self;
-    type ComputeVTable = NotSupported;
 
     fn id(_array: &Self::Array) -> ArrayId {
         ArrowVTable::ID
@@ -88,9 +83,8 @@ impl VTable for ArrowVTable {
         Ok(())
     }
 
-    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<Canonical> {
+    fn execute(array: &Self::Array, _ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
         ArrayRef::from_arrow(array.inner.as_ref(), array.dtype.is_nullable())
-            .execute::<Canonical>(ctx)
     }
 }
 
@@ -150,8 +144,8 @@ impl BaseArrayVTable<ArrowVTable> for ArrowVTable {
 }
 
 impl OperationsVTable<ArrowVTable> for ArrowVTable {
-    fn scalar_at(_array: &ArrowArray, _index: usize) -> Scalar {
-        vortex_panic!("Not supported")
+    fn scalar_at(_array: &ArrowArray, _index: usize) -> VortexResult<Scalar> {
+        vortex_bail!("ArrowArray does not support scalar_at")
     }
 }
 
@@ -171,14 +165,6 @@ impl ValidityVTable<ArrowVTable> for ArrowVTable {
                 ),
             },
         })
-    }
-
-    fn validity_mask(array: &ArrowArray) -> Mask {
-        array
-            .inner
-            .logical_nulls()
-            .map(|null_buffer| Mask::from_buffer(null_buffer.inner().clone().into()))
-            .unwrap_or_else(|| Mask::new_true(array.inner.len()))
     }
 }
 

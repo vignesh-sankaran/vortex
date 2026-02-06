@@ -8,7 +8,7 @@ use vortex_dtype::FieldPath;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
-use vortex_vector::Datum;
+use vortex_session::VortexSession;
 
 use crate::ArrayRef;
 use crate::expr::Arity;
@@ -37,7 +37,11 @@ impl VTable for Root {
         Ok(Some(vec![]))
     }
 
-    fn deserialize(&self, _metadata: &[u8]) -> VortexResult<Self::Options> {
+    fn deserialize(
+        &self,
+        _metadata: &[u8],
+        _session: &VortexSession,
+    ) -> VortexResult<Self::Options> {
         Ok(EmptyOptions)
     }
 
@@ -65,16 +69,7 @@ impl VTable for Root {
         vortex_bail!("Root expression does not support return_dtype")
     }
 
-    fn evaluate(
-        &self,
-        _options: &Self::Options,
-        _expr: &Expression,
-        scope: &ArrayRef,
-    ) -> VortexResult<ArrayRef> {
-        Ok(scope.clone())
-    }
-
-    fn execute(&self, _data: &Self::Options, _args: ExecutionArgs) -> VortexResult<Datum> {
+    fn execute(&self, _data: &Self::Options, _args: ExecutionArgs) -> VortexResult<ArrayRef> {
         vortex_bail!("Root expression is not executable")
     }
 

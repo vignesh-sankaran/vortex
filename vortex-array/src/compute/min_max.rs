@@ -146,7 +146,7 @@ fn min_max_impl(
     array: &dyn Array,
     kernels: &[ArcRef<dyn Kernel>],
 ) -> VortexResult<Option<MinMaxResult>> {
-    if array.is_empty() || array.valid_count() == 0 {
+    if array.is_empty() || array.valid_count()? == 0 {
         return Ok(None);
     }
 
@@ -179,9 +179,6 @@ fn min_max_impl(
         if let Some(output) = kernel.invoke(&args)? {
             return MinMaxResult::from_scalar(output.unwrap_scalar()?);
         }
-    }
-    if let Some(output) = array.invoke(&MIN_MAX_FN, &args)? {
-        return MinMaxResult::from_scalar(output.unwrap_scalar()?);
     }
 
     if !array.is_canonical() {
@@ -257,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_bool_max() {
-        let p = BoolArray::from_bit_buffer(
+        let p = BoolArray::new(
             BitBuffer::from([true, true, true].as_slice()),
             Validity::NonNullable,
         );
@@ -269,7 +266,7 @@ mod tests {
             })
         );
 
-        let p = BoolArray::from_bit_buffer(
+        let p = BoolArray::new(
             BitBuffer::from([false, false, false].as_slice()),
             Validity::NonNullable,
         );
@@ -281,7 +278,7 @@ mod tests {
             })
         );
 
-        let p = BoolArray::from_bit_buffer(
+        let p = BoolArray::new(
             BitBuffer::from([false, true, false].as_slice()),
             Validity::NonNullable,
         );

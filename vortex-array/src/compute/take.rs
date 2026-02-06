@@ -81,7 +81,7 @@ impl ComputeFnVTable for Take {
         // TODO(ngates): if indices min is quite high, we could slice self and offset the indices
         //  such that canonicalize does less work.
 
-        if indices.all_invalid() {
+        if indices.all_invalid()? {
             return Ok(ConstantArray::new(
                 Scalar::null(array.dtype().as_nullable()),
                 indices.len(),
@@ -132,7 +132,7 @@ fn propagate_take_stats(
     indices: &dyn Array,
 ) -> VortexResult<()> {
     target.statistics().with_mut_typed_stats_set(|mut st| {
-        if indices.all_valid() {
+        if indices.all_valid().unwrap_or(false) {
             let is_constant = source.statistics().get_as::<bool>(Stat::IsConstant);
             if is_constant == Some(Precision::Exact(true)) {
                 // Any combination of elements from a constant array is still const
@@ -170,18 +170,12 @@ fn take_impl(
             return output.unwrap_array();
         }
     }
-    if let Some(output) = indices.invoke(&TAKE_FROM_FN, &args)? {
-        return output.unwrap_array();
-    }
 
     // Then look for a Take kernel
     for kernel in kernels {
         if let Some(output) = kernel.invoke(&args)? {
             return output.unwrap_array();
         }
-    }
-    if let Some(output) = array.invoke(&TAKE_FN, &args)? {
-        return output.unwrap_array();
     }
 
     // Otherwise, canonicalize and try again.

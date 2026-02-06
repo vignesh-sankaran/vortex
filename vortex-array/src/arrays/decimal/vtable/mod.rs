@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::ops::Range;
-
 use vortex_buffer::Alignment;
-use vortex_buffer::Buffer;
 use vortex_dtype::DType;
 use vortex_dtype::NativeDecimalType;
 use vortex_dtype::match_each_decimal_value_type;
@@ -15,10 +12,8 @@ use vortex_error::vortex_ensure;
 use vortex_scalar::DecimalType;
 
 use crate::ArrayRef;
-use crate::Canonical;
 use crate::DeserializeMetadata;
 use crate::ExecutionCtx;
-use crate::IntoArray;
 use crate::ProstMetadata;
 use crate::SerializeMetadata;
 use crate::arrays::DecimalArray;
@@ -26,20 +21,15 @@ use crate::buffer::BufferHandle;
 use crate::serde::ArrayChildren;
 use crate::validity::Validity;
 use crate::vtable;
-use crate::vtable::NotSupported;
 use crate::vtable::VTable;
-use crate::vtable::ValidityHelper;
 use crate::vtable::ValidityVTableFromValidityHelper;
 
 mod array;
 mod operations;
-pub mod rules;
 mod validity;
 mod visitor;
 
-pub use rules::DecimalMaskedValidityRule;
-
-use crate::arrays::decimal::vtable::rules::RULES;
+use crate::arrays::decimal::compute::rules::RULES;
 use crate::vtable::ArrayId;
 
 vtable!(Decimal);
@@ -60,7 +50,6 @@ impl VTable for DecimalVTable {
     type OperationsVTable = Self;
     type ValidityVTable = ValidityVTableFromValidityHelper;
     type VisitorVTable = Self;
-    type ComputeVTable = NotSupported;
 
     fn id(_array: &Self::Array) -> ArrayId {
         Self::ID
@@ -91,7 +80,7 @@ impl VTable for DecimalVTable {
         if buffers.len() != 1 {
             vortex_bail!("Expected 1 buffer, got {}", buffers.len());
         }
-        let buffer = buffers[0].clone().try_to_host()?;
+        let values = buffers[0].clone();
 
         let validity = if children.is_empty() {
             Validity::from(dtype.nullability())
@@ -109,12 +98,11 @@ impl VTable for DecimalVTable {
         match_each_decimal_value_type!(metadata.values_type(), |D| {
             // Check and reinterpret-cast the buffer
             vortex_ensure!(
-                buffer.is_aligned(Alignment::of::<D>()),
+                values.is_aligned_to(Alignment::of::<D>()),
                 "DecimalArray buffer not aligned for values type {:?}",
                 D::DECIMAL_TYPE
             );
-            let buffer = Buffer::<D>::from_byte_buffer(buffer);
-            DecimalArray::try_new::<D>(buffer, *decimal_dtype, validity)
+            DecimalArray::try_new_handle(values, metadata.values_type(), *decimal_dtype, validity)
         })
     }
 
@@ -138,8 +126,8 @@ impl VTable for DecimalVTable {
         Ok(())
     }
 
-    fn execute(array: &Self::Array, _ctx: &mut ExecutionCtx) -> VortexResult<Canonical> {
-        Ok(Canonical::Decimal(array.clone()))
+    fn execute(array: &Self::Array, _ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
+        Ok(array.to_array())
     }
 
     fn reduce_parent(
@@ -148,17 +136,6 @@ impl VTable for DecimalVTable {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         RULES.evaluate(array, parent, child_idx)
-    }
-
-    fn slice(array: &Self::Array, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        let result = match_each_decimal_value_type!(array.values_type(), |D| {
-            let sliced = array.buffer::<D>().slice(range.clone());
-            let validity = array.validity().clone().slice(range);
-            // SAFETY: Slicing preserves all DecimalArray invariants
-            unsafe { DecimalArray::new_unchecked(sliced, array.decimal_dtype(), validity) }
-                .into_array()
-        });
-        Ok(Some(result))
     }
 }
 

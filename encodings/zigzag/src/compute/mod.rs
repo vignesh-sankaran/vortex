@@ -6,13 +6,11 @@ mod cast;
 use vortex_array::Array;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
-use vortex_array::compute::FilterKernel;
-use vortex_array::compute::FilterKernelAdapter;
+use vortex_array::arrays::FilterReduce;
 use vortex_array::compute::MaskKernel;
 use vortex_array::compute::MaskKernelAdapter;
 use vortex_array::compute::TakeKernel;
 use vortex_array::compute::TakeKernelAdapter;
-use vortex_array::compute::filter;
 use vortex_array::compute::mask;
 use vortex_array::compute::take;
 use vortex_array::register_kernel;
@@ -22,14 +20,12 @@ use vortex_mask::Mask;
 use crate::ZigZagArray;
 use crate::ZigZagVTable;
 
-impl FilterKernel for ZigZagVTable {
-    fn filter(&self, array: &ZigZagArray, mask: &Mask) -> VortexResult<ArrayRef> {
-        let encoded = filter(array.encoded(), mask)?;
-        Ok(ZigZagArray::try_new(encoded)?.into_array())
+impl FilterReduce for ZigZagVTable {
+    fn filter(array: &ZigZagArray, mask: &Mask) -> VortexResult<Option<ArrayRef>> {
+        let encoded = array.encoded().filter(mask.clone())?;
+        Ok(Some(ZigZagArray::try_new(encoded)?.into_array()))
     }
 }
-
-register_kernel!(FilterKernelAdapter(ZigZagVTable).lift());
 
 impl TakeKernel for ZigZagVTable {
     fn take(&self, array: &ZigZagArray, indices: &dyn Array) -> VortexResult<ArrayRef> {
@@ -80,7 +76,6 @@ mod tests {
     use vortex_array::assert_arrays_eq;
     use vortex_array::compute::conformance::binary_numeric::test_binary_numeric_array;
     use vortex_array::compute::conformance::consistency::test_array_consistency;
-    use vortex_array::compute::filter;
     use vortex_array::compute::take;
     use vortex_array::validity::Validity;
     use vortex_buffer::BitBuffer;
@@ -99,7 +94,7 @@ mod tests {
             Validity::AllValid,
         ))?;
         assert_eq!(
-            zigzag.scalar_at(1),
+            zigzag.scalar_at(1)?,
             Scalar::primitive(-160, Nullability::Nullable)
         );
         Ok(())
@@ -127,7 +122,7 @@ mod tests {
         ))?;
 
         let filter_mask = BitBuffer::from(vec![true, false, true]).into();
-        let actual = filter(zigzag.as_ref(), &filter_mask).unwrap();
+        let actual = zigzag.filter(filter_mask).unwrap();
         let expected =
             zigzag_encode(PrimitiveArray::new(buffer![-189, 1], Validity::AllValid))?.into_array();
         assert_arrays_eq!(actual, expected);

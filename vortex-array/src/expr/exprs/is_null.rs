@@ -2,20 +2,13 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::fmt::Formatter;
-use std::ops::Not;
 
 use vortex_dtype::DType;
 use vortex_dtype::Nullability;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
-use vortex_mask::Mask;
-use vortex_vector::Datum;
-use vortex_vector::ScalarOps;
-use vortex_vector::VectorOps;
-use vortex_vector::bool::BoolScalar;
-use vortex_vector::bool::BoolVector;
+use vortex_session::VortexSession;
 
-use crate::Array;
 use crate::ArrayRef;
 use crate::IntoArray;
 use crate::arrays::ConstantArray;
@@ -48,7 +41,11 @@ impl VTable for IsNull {
         Ok(Some(vec![]))
     }
 
-    fn deserialize(&self, _metadata: &[u8]) -> VortexResult<Self::Options> {
+    fn deserialize(
+        &self,
+        _metadata: &[u8],
+        _session: &VortexSession,
+    ) -> VortexResult<Self::Options> {
         Ok(EmptyOptions)
     }
 
@@ -78,29 +75,18 @@ impl VTable for IsNull {
         Ok(DType::Bool(Nullability::NonNullable))
     }
 
-    fn evaluate(
-        &self,
-        _options: &Self::Options,
-        expr: &Expression,
-        scope: &ArrayRef,
-    ) -> VortexResult<ArrayRef> {
-        let array = expr.child(0).evaluate(scope)?;
-        Ok(match array.validity()? {
-            Validity::NonNullable | Validity::AllValid => {
-                ConstantArray::new(false, array.len()).into_array()
-            }
-            Validity::AllInvalid => ConstantArray::new(true, array.len()).into_array(),
-            Validity::Array(a) => a.not()?,
-        })
-    }
+    fn execute(&self, _data: &Self::Options, mut args: ExecutionArgs) -> VortexResult<ArrayRef> {
+        let child = args.inputs.pop().vortex_expect("Missing input child");
+        if let Some(scalar) = child.as_constant() {
+            return Ok(ConstantArray::new(scalar.is_null(), args.row_count).into_array());
+        }
 
-    fn execute(&self, _data: &Self::Options, mut args: ExecutionArgs) -> VortexResult<Datum> {
-        let child = args.datums.pop().vortex_expect("Missing input child");
-        Ok(match child {
-            Datum::Scalar(s) => Datum::Scalar(BoolScalar::new(Some(s.is_null())).into()),
-            Datum::Vector(v) => Datum::Vector(
-                BoolVector::new(v.validity().to_bit_buffer().not(), Mask::new_true(v.len())).into(),
-            ),
+        Ok(match child.validity()? {
+            Validity::NonNullable | Validity::AllValid => {
+                ConstantArray::new(false, args.row_count).into_array()
+            }
+            Validity::AllInvalid => ConstantArray::new(true, args.row_count).into_array(),
+            Validity::Array(a) => a.not()?.execute(args.ctx)?,
         })
     }
 
@@ -184,14 +170,14 @@ mod tests {
                 .into_array();
         let expected = [false, true, false, true, false];
 
-        let result = is_null(root()).evaluate(&test_array.clone()).unwrap();
+        let result = test_array.clone().apply(&is_null(root())).unwrap();
 
         assert_eq!(result.len(), test_array.len());
         assert_eq!(result.dtype(), &DType::Bool(Nullability::NonNullable));
 
         for (i, expected_value) in expected.iter().enumerate() {
             assert_eq!(
-                result.scalar_at(i),
+                result.scalar_at(i).unwrap(),
                 Scalar::bool(*expected_value, Nullability::NonNullable)
             );
         }
@@ -201,13 +187,16 @@ mod tests {
     fn evaluate_all_false() {
         let test_array = buffer![1, 2, 3, 4, 5].into_array();
 
-        let result = is_null(root()).evaluate(&test_array.clone()).unwrap();
+        let result = test_array.clone().apply(&is_null(root())).unwrap();
 
         assert_eq!(result.len(), test_array.len());
-        assert_eq!(
-            result.as_constant().unwrap(),
-            Scalar::bool(false, Nullability::NonNullable)
-        );
+        // All values should be false (non-nullable input)
+        for i in 0..result.len() {
+            assert_eq!(
+                result.scalar_at(i).unwrap(),
+                Scalar::bool(false, Nullability::NonNullable)
+            );
+        }
     }
 
     #[test]
@@ -216,13 +205,16 @@ mod tests {
             PrimitiveArray::from_option_iter(vec![None::<i32>, None, None, None, None])
                 .into_array();
 
-        let result = is_null(root()).evaluate(&test_array.clone()).unwrap();
+        let result = test_array.clone().apply(&is_null(root())).unwrap();
 
         assert_eq!(result.len(), test_array.len());
-        assert_eq!(
-            result.as_constant().unwrap(),
-            Scalar::bool(true, Nullability::NonNullable)
-        );
+        // All values should be true (all nulls)
+        for i in 0..result.len() {
+            assert_eq!(
+                result.scalar_at(i).unwrap(),
+                Scalar::bool(true, Nullability::NonNullable)
+            );
+        }
     }
 
     #[test]
@@ -236,8 +228,9 @@ mod tests {
         .into_array();
         let expected = [false, true, false, true, false];
 
-        let result = is_null(get_item("a", root()))
-            .evaluate(&test_array.clone())
+        let result = test_array
+            .clone()
+            .apply(&is_null(get_item("a", root())))
             .unwrap();
 
         assert_eq!(result.len(), test_array.len());
@@ -245,7 +238,7 @@ mod tests {
 
         for (i, expected_value) in expected.iter().enumerate() {
             assert_eq!(
-                result.scalar_at(i),
+                result.scalar_at(i).unwrap(),
                 Scalar::bool(*expected_value, Nullability::NonNullable)
             );
         }

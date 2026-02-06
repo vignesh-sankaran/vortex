@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::hash::Hash;
-use std::ops::Range;
 
 use vortex_array::Array;
 use vortex_array::ArrayBufferVisitor;
@@ -10,7 +9,6 @@ use vortex_array::ArrayChildVisitor;
 use vortex_array::ArrayEq;
 use vortex_array::ArrayHash;
 use vortex_array::ArrayRef;
-use vortex_array::Canonical;
 use vortex_array::EmptyMetadata;
 use vortex_array::ExecutionCtx;
 use vortex_array::IntoArray;
@@ -22,7 +20,6 @@ use vortex_array::stats::StatsSetRef;
 use vortex_array::vtable;
 use vortex_array::vtable::ArrayId;
 use vortex_array::vtable::BaseArrayVTable;
-use vortex_array::vtable::NotSupported;
 use vortex_array::vtable::OperationsVTable;
 use vortex_array::vtable::VTable;
 use vortex_array::vtable::ValidityChild;
@@ -39,6 +36,7 @@ use vortex_scalar::Scalar;
 use zigzag::ZigZag as ExternalZigZag;
 
 use crate::compute::ZigZagEncoded;
+use crate::rules::RULES;
 use crate::zigzag_decode;
 
 vtable!(ZigZag);
@@ -52,7 +50,6 @@ impl VTable for ZigZagVTable {
     type OperationsVTable = Self;
     type ValidityVTable = ValidityVTableFromChild;
     type VisitorVTable = Self;
-    type ComputeVTable = NotSupported;
 
     fn id(_array: &Self::Array) -> ArrayId {
         Self::ID
@@ -98,16 +95,16 @@ impl VTable for ZigZagVTable {
         Ok(())
     }
 
-    fn slice(array: &Self::Array, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        Ok(Some(
-            ZigZagArray::new(array.encoded().slice(range)).into_array(),
-        ))
+    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
+        Ok(zigzag_decode(array.encoded().clone().execute(ctx)?).into_array())
     }
 
-    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<Canonical> {
-        Ok(Canonical::Primitive(zigzag_decode(
-            array.encoded().clone().execute(ctx)?,
-        )))
+    fn reduce_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+    ) -> VortexResult<Option<ArrayRef>> {
+        RULES.evaluate(array, parent, child_idx)
     }
 }
 
@@ -179,14 +176,14 @@ impl BaseArrayVTable<ZigZagVTable> for ZigZagVTable {
 }
 
 impl OperationsVTable<ZigZagVTable> for ZigZagVTable {
-    fn scalar_at(array: &ZigZagArray, index: usize) -> Scalar {
-        let scalar = array.encoded().scalar_at(index);
+    fn scalar_at(array: &ZigZagArray, index: usize) -> VortexResult<Scalar> {
+        let scalar = array.encoded().scalar_at(index)?;
         if scalar.is_null() {
-            return scalar.reinterpret_cast(array.ptype());
+            return Ok(scalar.reinterpret_cast(array.ptype()));
         }
 
         let pscalar = scalar.as_primitive();
-        match_each_unsigned_integer_ptype!(pscalar.ptype(), |P| {
+        Ok(match_each_unsigned_integer_ptype!(pscalar.ptype(), |P| {
             Scalar::primitive(
                 <<P as ZigZagEncoded>::Int>::decode(
                     pscalar
@@ -195,7 +192,7 @@ impl OperationsVTable<ZigZagVTable> for ZigZagVTable {
                 ),
                 array.dtype().nullability(),
             )
-        })
+        }))
     }
 }
 
@@ -243,9 +240,12 @@ mod test {
             array.statistics().compute_is_constant()
         );
 
-        let sliced = zigzag.slice(0..2);
+        let sliced = zigzag.slice(0..2).unwrap();
         let sliced = sliced.as_::<ZigZagVTable>();
-        assert_eq!(sliced.scalar_at(sliced.len() - 1), Scalar::from(-5i32));
+        assert_eq!(
+            sliced.scalar_at(sliced.len() - 1).unwrap(),
+            Scalar::from(-5i32)
+        );
 
         assert_eq!(
             sliced.statistics().compute_min::<i32>(),

@@ -9,6 +9,8 @@ mod is_constant;
 mod is_sorted;
 mod like;
 mod min_max;
+pub(crate) mod rules;
+mod slice;
 
 use vortex_error::VortexResult;
 use vortex_mask::Mask;
@@ -18,11 +20,9 @@ use super::DictVTable;
 use crate::Array;
 use crate::ArrayRef;
 use crate::IntoArray;
-use crate::compute::FilterKernel;
-use crate::compute::FilterKernelAdapter;
+use crate::arrays::filter::FilterReduce;
 use crate::compute::TakeKernel;
 use crate::compute::TakeKernelAdapter;
-use crate::compute::filter;
 use crate::compute::take;
 use crate::register_kernel;
 
@@ -37,17 +37,17 @@ impl TakeKernel for DictVTable {
 
 register_kernel!(TakeKernelAdapter(DictVTable).lift());
 
-impl FilterKernel for DictVTable {
-    fn filter(&self, array: &DictArray, mask: &Mask) -> VortexResult<ArrayRef> {
-        let codes = filter(array.codes(), mask)?;
+impl FilterReduce for DictVTable {
+    fn filter(array: &DictArray, mask: &Mask) -> VortexResult<Option<ArrayRef>> {
+        let codes = array.codes().filter(mask.clone())?;
 
         // SAFETY: filtering codes doesn't change invariants
         // Preserve all_values_referenced since filtering codes doesn't affect which values are referenced
-        unsafe { Ok(DictArray::new_unchecked(codes, array.values().clone()).into_array()) }
+        Ok(Some(unsafe {
+            DictArray::new_unchecked(codes, array.values().clone()).into_array()
+        }))
     }
 }
-
-register_kernel!(FilterKernelAdapter(DictVTable).lift());
 
 #[cfg(test)]
 mod test {
@@ -146,7 +146,7 @@ mod test {
             Some(5),
         ]);
         let dict = dict_encode(reference.as_ref()).unwrap();
-        dict.slice(1..4)
+        dict.slice(1..4).unwrap()
     }
 
     #[test]

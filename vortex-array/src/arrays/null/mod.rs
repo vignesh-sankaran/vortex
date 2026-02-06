@@ -2,22 +2,19 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::hash::Hash;
-use std::ops::Range;
 
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
 use vortex_error::vortex_ensure;
-use vortex_mask::Mask;
 use vortex_scalar::Scalar;
 
 use crate::ArrayBufferVisitor;
 use crate::ArrayChildVisitor;
 use crate::ArrayRef;
-use crate::Canonical;
 use crate::EmptyMetadata;
 use crate::ExecutionCtx;
-use crate::IntoArray;
 use crate::Precision;
+use crate::arrays::null::compute::rules::PARENT_RULES;
 use crate::buffer::BufferHandle;
 use crate::serde::ArrayChildren;
 use crate::stats::ArrayStats;
@@ -26,13 +23,12 @@ use crate::validity::Validity;
 use crate::vtable;
 use crate::vtable::ArrayId;
 use crate::vtable::BaseArrayVTable;
-use crate::vtable::NotSupported;
 use crate::vtable::OperationsVTable;
 use crate::vtable::VTable;
 use crate::vtable::ValidityVTable;
 use crate::vtable::VisitorVTable;
 
-mod compute;
+pub(crate) mod compute;
 
 vtable!(Null);
 
@@ -45,7 +41,6 @@ impl VTable for NullVTable {
     type OperationsVTable = Self;
     type ValidityVTable = Self;
     type VisitorVTable = Self;
-    type ComputeVTable = NotSupported;
 
     fn id(_array: &Self::Array) -> ArrayId {
         Self::ID
@@ -82,12 +77,16 @@ impl VTable for NullVTable {
         Ok(())
     }
 
-    fn slice(_array: &Self::Array, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        Ok(Some(NullArray::new(range.len()).into_array()))
+    fn reduce_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+    ) -> VortexResult<Option<ArrayRef>> {
+        PARENT_RULES.evaluate(array, parent, child_idx)
     }
 
-    fn execute(array: &Self::Array, _ctx: &mut ExecutionCtx) -> VortexResult<Canonical> {
-        Ok(Canonical::Null(array.clone()))
+    fn execute(array: &Self::Array, _ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
+        Ok(array.to_array())
     }
 }
 
@@ -101,6 +100,7 @@ impl VTable for NullVTable {
 /// # Examples
 ///
 /// ```
+/// # fn main() -> vortex_error::VortexResult<()> {
 /// use vortex_array::arrays::NullArray;
 /// use vortex_array::IntoArray;
 ///
@@ -108,12 +108,14 @@ impl VTable for NullVTable {
 /// let array = NullArray::new(5);
 ///
 /// // Slice the array - still contains nulls
-/// let sliced = array.slice(1..3);
+/// let sliced = array.slice(1..3)?;
 /// assert_eq!(sliced.len(), 2);
 ///
 /// // All elements are null
-/// let scalar = array.scalar_at(0);
+/// let scalar = array.scalar_at(0).unwrap();
 /// assert!(scalar.is_null());
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone, Debug)]
 pub struct NullArray {
@@ -166,17 +168,13 @@ impl VisitorVTable<NullVTable> for NullVTable {
 }
 
 impl OperationsVTable<NullVTable> for NullVTable {
-    fn scalar_at(_array: &NullArray, _index: usize) -> Scalar {
-        Scalar::null(DType::Null)
+    fn scalar_at(_array: &NullArray, _index: usize) -> VortexResult<Scalar> {
+        Ok(Scalar::null(DType::Null))
     }
 }
 
 impl ValidityVTable<NullVTable> for NullVTable {
     fn validity(_array: &NullArray) -> VortexResult<Validity> {
         Ok(Validity::AllInvalid)
-    }
-
-    fn validity_mask(array: &NullArray) -> Mask {
-        Mask::AllFalse(array.len)
     }
 }

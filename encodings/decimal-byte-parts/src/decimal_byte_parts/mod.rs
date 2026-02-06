@@ -3,9 +3,9 @@
 
 mod compute;
 mod rules;
+mod slice;
 
 use std::hash::Hash;
-use std::ops::Range;
 
 use prost::Message as _;
 use vortex_array::Array;
@@ -14,7 +14,6 @@ use vortex_array::ArrayChildVisitor;
 use vortex_array::ArrayEq;
 use vortex_array::ArrayHash;
 use vortex_array::ArrayRef;
-use vortex_array::Canonical;
 use vortex_array::ExecutionCtx;
 use vortex_array::IntoArray;
 use vortex_array::Precision;
@@ -29,7 +28,6 @@ use vortex_array::stats::StatsSetRef;
 use vortex_array::vtable;
 use vortex_array::vtable::ArrayId;
 use vortex_array::vtable::BaseArrayVTable;
-use vortex_array::vtable::NotSupported;
 use vortex_array::vtable::OperationsVTable;
 use vortex_array::vtable::VTable;
 use vortex_array::vtable::ValidityChild;
@@ -68,7 +66,6 @@ impl VTable for DecimalBytePartsVTable {
     type OperationsVTable = Self;
     type ValidityVTable = ValidityVTableFromChild;
     type VisitorVTable = Self;
-    type ComputeVTable = NotSupported;
 
     fn id(_array: &Self::Array) -> ArrayId {
         Self::ID
@@ -130,15 +127,7 @@ impl VTable for DecimalBytePartsVTable {
         PARENT_RULES.evaluate(array, parent, child_idx)
     }
 
-    fn slice(array: &Self::Array, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        // SAFETY: slicing encoded MSP does not change the encoded values
-        Ok(Some(unsafe {
-            DecimalBytePartsArray::new_unchecked(array.msp.slice(range), *array.decimal_dtype())
-                .into_array()
-        }))
-    }
-
-    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<Canonical> {
+    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
         to_canonical_decimal(array, ctx)
     }
 }
@@ -154,9 +143,15 @@ pub struct DecimalBytePartsArray {
     // NOTE: the lower_parts is currently unused, we reserve this field so that it is properly
     //  read/written during serde, but provide no constructor to initialize this to anything
     //  other than the empty Vec.
+    // Must update `DecimalBytePartsArrayParts` too.
     _lower_parts: Vec<ArrayRef>,
     dtype: DType,
     stats_set: ArrayStats,
+}
+
+pub struct DecimalBytePartsArrayParts {
+    pub msp: ArrayRef,
+    pub dtype: DType,
 }
 
 impl DecimalBytePartsArray {
@@ -181,6 +176,14 @@ impl DecimalBytePartsArray {
             _lower_parts: Vec::new(),
             dtype: DType::Decimal(decimal_dtype, nullable),
             stats_set: Default::default(),
+        }
+    }
+
+    /// If `_lower_parts` is supported check all calls use this correctly.
+    pub fn into_parts(self) -> DecimalBytePartsArrayParts {
+        DecimalBytePartsArrayParts {
+            msp: self.msp,
+            dtype: self.dtype,
         }
     }
 
@@ -237,7 +240,7 @@ impl BaseArrayVTable<DecimalBytePartsVTable> for DecimalBytePartsVTable {
 fn to_canonical_decimal(
     array: &DecimalBytePartsArray,
     ctx: &mut ExecutionCtx,
-) -> VortexResult<Canonical> {
+) -> VortexResult<ArrayRef> {
     // TODO(joe): support parts len != 1
     let prim = array.msp.clone().execute::<PrimitiveArray>(ctx)?;
     // Depending on the decimal type and the min/max of the primitive array we can choose
@@ -246,26 +249,30 @@ fn to_canonical_decimal(
     Ok(match_each_signed_integer_ptype!(prim.ptype(), |P| {
         // SAFETY: The primitive array's buffer is already validated with correct type.
         // The decimal dtype matches the array's dtype, and validity is preserved.
-        Canonical::Decimal(unsafe {
+        unsafe {
             DecimalArray::new_unchecked(
                 prim.to_buffer::<P>(),
                 *array.decimal_dtype(),
                 prim.validity().clone(),
             )
-        })
+        }
+        .into_array()
     }))
 }
 
 impl OperationsVTable<DecimalBytePartsVTable> for DecimalBytePartsVTable {
-    fn scalar_at(array: &DecimalBytePartsArray, index: usize) -> Scalar {
+    fn scalar_at(array: &DecimalBytePartsArray, index: usize) -> VortexResult<Scalar> {
         // TODO(joe): support parts len != 1
-        let scalar = array.msp.scalar_at(index);
+        let scalar = array.msp.scalar_at(index)?;
 
         // Note. values in msp, can only be signed integers upto size i64.
         let primitive_scalar = scalar.as_primitive();
         // TODO(joe): extend this to support multiple parts.
         let value = primitive_scalar.as_::<i64>().vortex_expect("non-null");
-        Scalar::new(array.dtype.clone(), DecimalValue::I64(value).into())
+        Ok(Scalar::new(
+            array.dtype.clone(),
+            DecimalValue::I64(value).into(),
+        ))
     }
 }
 
@@ -314,14 +321,14 @@ mod tests {
         .unwrap()
         .to_array();
 
-        assert_eq!(Scalar::null(dtype.clone()), array.scalar_at(0));
+        assert_eq!(Scalar::null(dtype.clone()), array.scalar_at(0).unwrap());
         assert_eq!(
             Scalar::new(dtype.clone(), DecimalValue::I64(200).into()),
-            array.scalar_at(1)
+            array.scalar_at(1).unwrap()
         );
         assert_eq!(
             Scalar::new(dtype, DecimalValue::I64(400).into()),
-            array.scalar_at(2)
+            array.scalar_at(2).unwrap()
         );
     }
 }

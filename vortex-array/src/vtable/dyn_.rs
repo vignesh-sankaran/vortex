@@ -6,7 +6,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
-use std::ops::Range;
 
 use arcref::ArcRef;
 use vortex_dtype::DType;
@@ -17,7 +16,6 @@ use vortex_error::vortex_ensure;
 use crate::Array;
 use crate::ArrayAdapter;
 use crate::ArrayRef;
-use crate::Canonical;
 use crate::buffer::BufferHandle;
 use crate::executor::ExecutionCtx;
 use crate::serde::ArrayChildren;
@@ -58,22 +56,16 @@ pub trait DynVTable: 'static + private::Sealed + Send + Sync + Debug {
     ) -> VortexResult<Option<ArrayRef>>;
 
     /// See [`VTable::execute`]
-    fn execute_canonical(
-        &self,
-        array: &ArrayRef,
-        ctx: &mut ExecutionCtx,
-    ) -> VortexResult<Canonical>;
+    fn execute(&self, array: &ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef>;
 
     /// See [`VTable::execute_parent`]
-    fn execute_canonical_parent(
+    fn execute_parent(
         &self,
         array: &ArrayRef,
         parent: &ArrayRef,
         child_idx: usize,
         ctx: &mut ExecutionCtx,
-    ) -> VortexResult<Option<Canonical>>;
-
-    fn slice(&self, array: &ArrayRef, range: Range<usize>) -> VortexResult<Option<ArrayRef>>;
+    ) -> VortexResult<Option<ArrayRef>>;
 }
 
 /// Adapter struct used to lift the [`VTable`] trait into an object-safe [`DynVTable`]
@@ -110,14 +102,14 @@ impl<V: VTable> DynVTable for ArrayVTableAdapter<V> {
         vortex_ensure!(
             reduced.len() == array.len(),
             "Reduced array length mismatch from {} to {}",
-            array.display_tree(),
-            reduced.display_tree()
+            array.encoding_id(),
+            reduced.encoding_id()
         );
         vortex_ensure!(
             reduced.dtype() == array.dtype(),
             "Reduced array dtype mismatch from {} to {}",
-            array.display_tree(),
-            reduced.display_tree()
+            array.encoding_id(),
+            reduced.encoding_id()
         );
         Ok(Some(reduced))
     }
@@ -135,24 +127,20 @@ impl<V: VTable> DynVTable for ArrayVTableAdapter<V> {
         vortex_ensure!(
             reduced.len() == parent.len(),
             "Reduced array length mismatch from {} to {}",
-            parent.display_tree(),
-            reduced.display_tree()
+            parent.encoding_id(),
+            reduced.encoding_id()
         );
         vortex_ensure!(
             reduced.dtype() == parent.dtype(),
             "Reduced array dtype mismatch from {} to {}",
-            parent.display_tree(),
-            reduced.display_tree()
+            parent.encoding_id(),
+            reduced.encoding_id()
         );
 
         Ok(Some(reduced))
     }
 
-    fn execute_canonical(
-        &self,
-        array: &ArrayRef,
-        ctx: &mut ExecutionCtx,
-    ) -> VortexResult<Canonical> {
+    fn execute(&self, array: &ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
         let result = V::execute(downcast::<V>(array), ctx)?;
 
         if cfg!(debug_assertions) {
@@ -168,16 +156,22 @@ impl<V: VTable> DynVTable for ArrayVTableAdapter<V> {
             );
         }
 
+        // TODO(ngates): do we want to do this on every execution? We used to in to_canonical.
+        result
+            .as_ref()
+            .statistics()
+            .inherit_from(array.statistics());
+
         Ok(result)
     }
 
-    fn execute_canonical_parent(
+    fn execute_parent(
         &self,
         array: &ArrayRef,
         parent: &ArrayRef,
         child_idx: usize,
         ctx: &mut ExecutionCtx,
-    ) -> VortexResult<Option<Canonical>> {
+    ) -> VortexResult<Option<ArrayRef>> {
         let Some(result) = V::execute_parent(downcast::<V>(array), parent, child_idx, ctx)? else {
             return Ok(None);
         };
@@ -194,33 +188,6 @@ impl<V: VTable> DynVTable for ArrayVTableAdapter<V> {
         }
 
         Ok(Some(result))
-    }
-
-    fn slice(&self, array: &ArrayRef, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        vortex_ensure!(
-            range.end <= array.len(),
-            "slice range {}..{} out of bounds for array of length {}",
-            range.start,
-            range.end,
-            array.len()
-        );
-
-        let Some(sliced) = V::slice(downcast::<V>(array), range.clone())? else {
-            return Ok(None);
-        };
-        vortex_ensure!(
-            sliced.len() == range.len(),
-            "Sliced array length mismatch: expected {}, got {}",
-            range.len(),
-            sliced.len()
-        );
-        vortex_ensure!(
-            sliced.dtype() == array.dtype(),
-            "Sliced array dtype mismatch: expected {}, got {}",
-            array.dtype(),
-            sliced.dtype()
-        );
-        Ok(Some(sliced))
     }
 }
 

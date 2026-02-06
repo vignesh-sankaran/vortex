@@ -12,7 +12,9 @@ use vortex_fastlanes::bitpack_compress::bitpack_encode_unchecked;
 
 mod array;
 mod compute;
+mod kernel;
 mod ops;
+mod slice;
 
 use std::ops::Shl;
 use std::ops::Shr;
@@ -178,6 +180,7 @@ impl RDEncoder {
     /// Encode a set of floating point values with ALP-RD.
     ///
     /// Each value will be split into a left and right component, which are compressed individually.
+    // TODO(joe): make fallible
     pub fn encode(&self, array: &PrimitiveArray) -> ALPRDArray {
         match_each_alp_float_ptype!(array.ptype(), |P| { self.encode_generic::<P>(array) })
     }
@@ -266,6 +269,7 @@ impl RDEncoder {
                 // TODO(0ax1): handle chunk offsets
                 None,
             )
+            .vortex_expect("Patches construction in encode")
         });
 
         ALPRDArray::try_new(

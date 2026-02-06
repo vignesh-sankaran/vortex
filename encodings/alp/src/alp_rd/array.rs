@@ -11,7 +11,6 @@ use vortex_array::ArrayChildVisitor;
 use vortex_array::ArrayEq;
 use vortex_array::ArrayHash;
 use vortex_array::ArrayRef;
-use vortex_array::Canonical;
 use vortex_array::DeserializeMetadata;
 use vortex_array::ExecutionCtx;
 use vortex_array::IntoArray;
@@ -29,7 +28,6 @@ use vortex_array::validity::Validity;
 use vortex_array::vtable;
 use vortex_array::vtable::ArrayId;
 use vortex_array::vtable::BaseArrayVTable;
-use vortex_array::vtable::NotSupported;
 use vortex_array::vtable::VTable;
 use vortex_array::vtable::ValidityChild;
 use vortex_array::vtable::ValidityVTableFromChild;
@@ -38,7 +36,6 @@ use vortex_buffer::Buffer;
 use vortex_dtype::DType;
 use vortex_dtype::Nullability;
 use vortex_dtype::PType;
-use vortex_error::VortexError;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
@@ -46,6 +43,7 @@ use vortex_error::vortex_ensure;
 use vortex_error::vortex_err;
 use vortex_mask::Mask;
 
+use crate::alp_rd::kernel::PARENT_KERNELS;
 use crate::alp_rd_decode;
 
 vtable!(ALPRD);
@@ -73,29 +71,9 @@ impl VTable for ALPRDVTable {
     type OperationsVTable = Self;
     type ValidityVTable = ValidityVTableFromChild;
     type VisitorVTable = Self;
-    type ComputeVTable = NotSupported;
 
     fn id(_array: &Self::Array) -> ArrayId {
         Self::ID
-    }
-
-    fn slice(array: &Self::Array, range: std::ops::Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        let left_parts_exceptions = array
-            .left_parts_patches()
-            .and_then(|patches| patches.slice(range.clone()));
-
-        // SAFETY: slicing components does not change the encoded values
-        Ok(Some(unsafe {
-            ALPRDArray::new_unchecked(
-                array.dtype().clone(),
-                array.left_parts().slice(range.clone()),
-                array.left_parts_dictionary().clone(),
-                array.right_parts().slice(range),
-                array.right_bit_width(),
-                left_parts_exceptions,
-            )
-            .into_array()
-        }))
     }
 
     fn metadata(array: &ALPRDArray) -> VortexResult<Self::Metadata> {
@@ -168,17 +146,17 @@ impl VTable for ALPRDVTable {
             .0
             .patches
             .map(|p| {
-                let indices = children.get(2, &p.indices_dtype(), p.len())?;
-                let values = children.get(3, &left_parts_dtype, p.len())?;
+                let indices = children.get(2, &p.indices_dtype()?, p.len()?)?;
+                let values = children.get(3, &left_parts_dtype, p.len()?)?;
 
-                Ok::<_, VortexError>(Patches::new(
+                Patches::new(
                     len,
-                    p.offset(),
+                    p.offset()?,
                     indices,
                     values,
                     // TODO(0ax1): handle chunk offsets
                     None,
-                ))
+                )
             })
             .transpose()?;
 
@@ -232,13 +210,13 @@ impl VTable for ALPRDVTable {
             array.left_parts_patches = Some(Patches::new(
                 array_len, offset, indices, values,
                 None, // chunk_offsets not currently supported for ALPRD
-            ));
+            )?);
         }
 
         Ok(())
     }
 
-    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<Canonical> {
+    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef> {
         let left_parts = array.left_parts().clone().execute::<PrimitiveArray>(ctx)?;
         let right_parts = array.right_parts().clone().execute::<PrimitiveArray>(ctx)?;
 
@@ -277,7 +255,16 @@ impl VTable for ALPRDVTable {
             )
         };
 
-        Ok(Canonical::Primitive(decoded_array))
+        Ok(decoded_array.into_array())
+    }
+
+    fn execute_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Option<ArrayRef>> {
+        PARENT_KERNELS.execute(array, parent, child_idx, ctx)
     }
 }
 
@@ -341,7 +328,7 @@ impl ALPRDArray {
 
         let left_parts_patches = left_parts_patches
             .map(|patches| {
-                if !patches.values().all_valid() {
+                if !patches.values().all_valid()? {
                     vortex_bail!("patches must be all valid: {}", patches.values());
                 }
                 // TODO(ngates): assert the DType, don't cast it.

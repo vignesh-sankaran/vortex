@@ -3,25 +3,42 @@
 
 //! Encodings that enable zero-copy sharing of data with Arrow.
 
+use vortex_buffer::Buffer;
 use vortex_dtype::DType;
+use vortex_dtype::NativePType;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
+use vortex_error::vortex_ensure;
 use vortex_error::vortex_panic;
 
 use crate::Array;
 use crate::ArrayRef;
+use crate::Columnar;
+use crate::Executable;
+use crate::ExecutionCtx;
 use crate::IntoArray;
 use crate::arrays::BoolArray;
+use crate::arrays::BoolVTable;
 use crate::arrays::DecimalArray;
+use crate::arrays::DecimalVTable;
 use crate::arrays::ExtensionArray;
+use crate::arrays::ExtensionVTable;
 use crate::arrays::FixedSizeListArray;
+use crate::arrays::FixedSizeListVTable;
 use crate::arrays::ListViewArray;
 use crate::arrays::ListViewRebuildMode;
+use crate::arrays::ListViewVTable;
 use crate::arrays::NullArray;
+use crate::arrays::NullVTable;
 use crate::arrays::PrimitiveArray;
+use crate::arrays::PrimitiveVTable;
 use crate::arrays::StructArray;
+use crate::arrays::StructVTable;
 use crate::arrays::VarBinViewArray;
+use crate::arrays::VarBinViewVTable;
+use crate::arrays::constant_canonicalize;
 use crate::builders::builder_with_capacity;
+use crate::matcher::Matcher;
 
 /// An enum capturing the default uncompressed encodings for each [Vortex type](DType).
 ///
@@ -114,6 +131,20 @@ impl Canonical {
             Canonical::FixedSizeList(c) => c.len(),
             Canonical::Struct(c) => c.len(),
             Canonical::Extension(c) => c.len(),
+        }
+    }
+
+    pub fn dtype(&self) -> &DType {
+        match self {
+            Canonical::Null(c) => c.dtype(),
+            Canonical::Bool(c) => c.dtype(),
+            Canonical::Primitive(c) => c.dtype(),
+            Canonical::Decimal(c) => c.dtype(),
+            Canonical::VarBinView(c) => c.dtype(),
+            Canonical::List(c) => c.dtype(),
+            Canonical::FixedSizeList(c) => c.dtype(),
+            Canonical::Struct(c) => c.dtype(),
+            Canonical::Extension(c) => c.dtype(),
         }
     }
 
@@ -442,6 +473,243 @@ impl From<Canonical> for ArrayRef {
     }
 }
 
+/// Recursively execute the array until it reaches canonical form.
+///
+/// Callers should prefer to execute into `Columnar` if they are able to optimize their use for
+/// constant arrays.
+impl Executable for Canonical {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        if let Some(canonical) = array.as_opt::<AnyCanonical>() {
+            return Ok(canonical.into());
+        }
+
+        // Invoke execute directly to avoid logging the call in the execution context.
+        Ok(match Columnar::execute(array.clone(), ctx)? {
+            Columnar::Canonical(c) => c,
+            Columnar::Constant(s) => {
+                let canonical = constant_canonicalize(&s)?;
+                canonical
+                    .as_ref()
+                    .statistics()
+                    .inherit_from(array.statistics());
+                canonical
+            }
+        })
+    }
+}
+
+/// Execute a primitive typed array into a buffer of native values, assuming all values are valid.
+///
+/// # Errors
+///
+/// Returns a `VortexError` if the array is not all-valid (has any nulls).
+impl<T: NativePType> Executable for Buffer<T> {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        let array = PrimitiveArray::execute(array, ctx)?;
+        vortex_ensure!(
+            array.all_valid()?,
+            "Cannot execute to native buffer: array is not all-valid."
+        );
+        Ok(array.into_buffer())
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`PrimitiveArray`].
+///
+/// This will panic if the array's dtype is not primitive.
+impl Executable for PrimitiveArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<PrimitiveVTable>() {
+            Ok(primitive) => Ok(primitive),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_primitive()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`BoolArray`].
+///
+/// This will panic if the array's dtype is not bool.
+impl Executable for BoolArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<BoolVTable>() {
+            Ok(bool_array) => Ok(bool_array),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_bool()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`NullArray`].
+///
+/// This will panic if the array's dtype is not null.
+impl Executable for NullArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<NullVTable>() {
+            Ok(null_array) => Ok(null_array),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_null()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`VarBinViewArray`].
+///
+/// This will panic if the array's dtype is not utf8 or binary.
+impl Executable for VarBinViewArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<VarBinViewVTable>() {
+            Ok(varbinview) => Ok(varbinview),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_varbinview()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as an [`ExtensionArray`].
+///
+/// This will panic if the array's dtype is not an extension type.
+impl Executable for ExtensionArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<ExtensionVTable>() {
+            Ok(ext_array) => Ok(ext_array),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_extension()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`DecimalArray`].
+///
+/// This will panic if the array's dtype is not decimal.
+impl Executable for DecimalArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<DecimalVTable>() {
+            Ok(decimal) => Ok(decimal),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_decimal()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`ListViewArray`].
+///
+/// This will panic if the array's dtype is not list.
+impl Executable for ListViewArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<ListViewVTable>() {
+            Ok(list) => Ok(list),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_listview()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`FixedSizeListArray`].
+///
+/// This will panic if the array's dtype is not fixed size list.
+impl Executable for FixedSizeListArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<FixedSizeListVTable>() {
+            Ok(fsl) => Ok(fsl),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_fixed_size_list()),
+        }
+    }
+}
+
+/// Execute the array to canonical form and unwrap as a [`StructArray`].
+///
+/// This will panic if the array's dtype is not struct.
+impl Executable for StructArray {
+    fn execute(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Self> {
+        match array.try_into::<StructVTable>() {
+            Ok(struct_array) => Ok(struct_array),
+            Err(array) => Ok(Canonical::execute(array, ctx)?.into_struct()),
+        }
+    }
+}
+
+/// A view into a canonical array type.
+#[derive(Debug, Clone)]
+pub enum CanonicalView<'a> {
+    Null(&'a NullArray),
+    Bool(&'a BoolArray),
+    Primitive(&'a PrimitiveArray),
+    Decimal(&'a DecimalArray),
+    VarBinView(&'a VarBinViewArray),
+    List(&'a ListViewArray),
+    FixedSizeList(&'a FixedSizeListArray),
+    Struct(&'a StructArray),
+    Extension(&'a ExtensionArray),
+}
+
+impl From<CanonicalView<'_>> for Canonical {
+    fn from(value: CanonicalView<'_>) -> Self {
+        match value {
+            CanonicalView::Null(a) => Canonical::Null(a.clone()),
+            CanonicalView::Bool(a) => Canonical::Bool(a.clone()),
+            CanonicalView::Primitive(a) => Canonical::Primitive(a.clone()),
+            CanonicalView::Decimal(a) => Canonical::Decimal(a.clone()),
+            CanonicalView::VarBinView(a) => Canonical::VarBinView(a.clone()),
+            CanonicalView::List(a) => Canonical::List(a.clone()),
+            CanonicalView::FixedSizeList(a) => Canonical::FixedSizeList(a.clone()),
+            CanonicalView::Struct(a) => Canonical::Struct(a.clone()),
+            CanonicalView::Extension(a) => Canonical::Extension(a.clone()),
+        }
+    }
+}
+
+impl AsRef<dyn Array> for CanonicalView<'_> {
+    fn as_ref(&self) -> &dyn Array {
+        match self {
+            CanonicalView::Null(a) => a.as_ref(),
+            CanonicalView::Bool(a) => a.as_ref(),
+            CanonicalView::Primitive(a) => a.as_ref(),
+            CanonicalView::Decimal(a) => a.as_ref(),
+            CanonicalView::VarBinView(a) => a.as_ref(),
+            CanonicalView::List(a) => a.as_ref(),
+            CanonicalView::FixedSizeList(a) => a.as_ref(),
+            CanonicalView::Struct(a) => a.as_ref(),
+            CanonicalView::Extension(a) => a.as_ref(),
+        }
+    }
+}
+
+/// A matcher for any canonical array type.
+pub struct AnyCanonical;
+impl Matcher for AnyCanonical {
+    type Match<'a> = CanonicalView<'a>;
+
+    fn matches(array: &dyn Array) -> bool {
+        array.is::<NullVTable>()
+            || array.is::<BoolVTable>()
+            || array.is::<PrimitiveVTable>()
+            || array.is::<DecimalVTable>()
+            || array.is::<StructVTable>()
+            || array.is::<ListViewVTable>()
+            || array.is::<FixedSizeListVTable>()
+            || array.is::<VarBinViewVTable>()
+            || array.is::<ExtensionVTable>()
+    }
+
+    fn try_match<'a>(array: &'a dyn Array) -> Option<Self::Match<'a>> {
+        if let Some(a) = array.as_opt::<NullVTable>() {
+            Some(CanonicalView::Null(a))
+        } else if let Some(a) = array.as_opt::<BoolVTable>() {
+            Some(CanonicalView::Bool(a))
+        } else if let Some(a) = array.as_opt::<PrimitiveVTable>() {
+            Some(CanonicalView::Primitive(a))
+        } else if let Some(a) = array.as_opt::<DecimalVTable>() {
+            Some(CanonicalView::Decimal(a))
+        } else if let Some(a) = array.as_opt::<StructVTable>() {
+            Some(CanonicalView::Struct(a))
+        } else if let Some(a) = array.as_opt::<ListViewVTable>() {
+            Some(CanonicalView::List(a))
+        } else if let Some(a) = array.as_opt::<FixedSizeListVTable>() {
+            Some(CanonicalView::FixedSizeList(a))
+        } else if let Some(a) = array.as_opt::<VarBinViewVTable>() {
+            Some(CanonicalView::VarBinView(a))
+        } else {
+            array
+                .as_opt::<ExtensionVTable>()
+                .map(CanonicalView::Extension)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
@@ -561,7 +829,7 @@ mod test {
             nulls.finish(),
         );
 
-        let vortex_struct = ArrayRef::from_arrow(&arrow_struct, true);
+        let vortex_struct = ArrayRef::from_arrow(&arrow_struct, true).unwrap();
 
         assert_eq!(
             &arrow_struct,
@@ -585,7 +853,7 @@ mod test {
         );
         let list_data_type = arrow_list.data_type();
 
-        let vortex_list = ArrayRef::from_arrow(&arrow_list, true);
+        let vortex_list = ArrayRef::from_arrow(&arrow_list, true).unwrap();
 
         let rt_arrow_list = vortex_list.into_arrow(list_data_type).unwrap();
 

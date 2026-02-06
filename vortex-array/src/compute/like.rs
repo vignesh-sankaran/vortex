@@ -106,9 +106,6 @@ impl ComputeFnVTable for Like {
                 return Ok(output);
             }
         }
-        if let Some(output) = array.invoke(&LIKE_FN, args)? {
-            return Ok(output);
-        }
 
         // Otherwise, we fall back to the Arrow implementation
         Ok(arrow_like(array, pattern, options)?.into())
@@ -230,5 +227,5 @@ pub(crate) fn arrow_like(
         (true, true) => arrow_string::like::nilike(&lhs, &rhs)?,
     };
 
-    Ok(from_arrow_array_with_len(&result, len, nullable))
+    from_arrow_array_with_len(&result, len, nullable)
 }

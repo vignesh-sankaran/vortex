@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+#[cfg(feature = "arbitrary")]
+mod arbitrary;
+#[cfg(feature = "arbitrary")]
+pub use arbitrary::ArbitraryRunEndArray;
 pub use array::*;
 pub use iter::trimmed_ends_iter;
 
@@ -16,7 +20,6 @@ mod rules;
 
 #[doc(hidden)]
 pub mod _benchmarking {
-    pub use compute::filter::filter_run_end;
     pub use compute::take::take_indices_unchecked;
 
     use super::*;

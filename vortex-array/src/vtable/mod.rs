@@ -4,8 +4,6 @@
 //! This module contains the VTable definitions for a Vortex encoding.
 
 mod array;
-mod canonical;
-mod compute;
 mod dyn_;
 mod operations;
 mod validity;
@@ -13,11 +11,8 @@ mod visitor;
 
 use std::fmt::Debug;
 use std::ops::Deref;
-use std::ops::Range;
 
 pub use array::*;
-pub use canonical::*;
-pub use compute::*;
 pub use dyn_::*;
 pub use operations::*;
 pub use validity::*;
@@ -27,7 +22,6 @@ use vortex_error::VortexResult;
 
 use crate::Array;
 use crate::ArrayRef;
-use crate::Canonical;
 use crate::IntoArray;
 use crate::buffer::BufferHandle;
 use crate::builders::ArrayBuilder;
@@ -38,9 +32,6 @@ use crate::serde::ArrayChildren;
 ///
 /// The logic is split across several "VTable" traits to enable easier code organization than
 /// simply lumping everything into a single trait.
-///
-/// Some of these vtables are optional, such as the [`ComputeVTable`],
-/// which can be disabled by assigning to the [`NotSupported`] type.
 ///
 /// From this [`VTable`] trait, we derive implementations for the sealed [`Array`] and [`DynVTable`]
 /// traits.
@@ -58,10 +49,6 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
     type OperationsVTable: OperationsVTable<Self>;
     type ValidityVTable: ValidityVTable<Self>;
     type VisitorVTable: VisitorVTable<Self>;
-
-    /// Optionally enable implementing dynamic compute dispatch for this encoding.
-    /// Can be disabled by assigning to the [`NotSupported`] type.
-    type ComputeVTable: ComputeVTable<Self>;
 
     /// Returns the ID of the array.
     fn id(array: &Self::Array) -> ArrayId;
@@ -90,8 +77,8 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
         builder: &mut dyn ArrayBuilder,
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<()> {
-        let canonical = Self::execute(array, ctx)?;
-        builder.extend_from_array(canonical.as_ref());
+        let array = Self::execute(array, ctx)?;
+        builder.extend_from_array(array.as_ref());
         Ok(())
     }
 
@@ -139,17 +126,32 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
     /// of children must be expected.
     fn with_children(array: &mut Self::Array, children: Vec<ArrayRef>) -> VortexResult<()>;
 
-    /// Execute this array to produce a [`Canonical`].
+    /// Execute this array to produce an [`ArrayRef`].
     ///
-    /// The returned [`Canonical`] must be the appropriate one for the array's logical
-    /// type (they are one-to-one with Vortex `DType`s), and should respect the output nullability
-    /// of the array.
+    /// Array execution is designed such that repeated execution of an array will eventually
+    /// converge to a canonical representation. Implementations of this function should therefore
+    /// ensure they make progress towards that goal.
+    ///
+    /// This includes fully evaluating the array, such us decoding run-end encoding, or executing
+    /// one of the array's children and re-building the array with the executed child.
+    ///
+    /// It is recommended to only perform a single step of execution per call to this function,
+    /// such that surrounding arrays have an opportunity to perform their own parent reduction
+    /// or execution logic.
+    ///
+    /// The returned array must be logically equivalent to the input array. In other words, the
+    /// recursively canonicalized forms of both arrays must be equal.
     ///
     /// Debug builds will panic if the returned array is of the wrong type, wrong length, or
     /// incorrectly contains null values.
-    fn execute(array: &Self::Array, _ctx: &mut ExecutionCtx) -> VortexResult<Canonical>;
+    ///
+    // TODO(ngates): in the future, we may pass a "target encoding hint" such that this array
+    //  can produce a more optimal representation for the parent. This could be used to preserve
+    //  varbin vs varbinview or list vs listview encodings when the parent knows it prefers
+    //  one representation over another, such as when exporting to a specific Arrow array.
+    fn execute(array: &Self::Array, ctx: &mut ExecutionCtx) -> VortexResult<ArrayRef>;
 
-    /// Attempt to execute the parent of this array to produce a [`Canonical`].
+    /// Attempt to execute the parent of this array.
     ///
     /// This function allows arrays to plug in specialized execution logic for their parent. For
     /// example, strings compressed as FSST arrays can implement a custom equality comparison when
@@ -161,7 +163,7 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
         parent: &ArrayRef,
         child_idx: usize,
         ctx: &mut ExecutionCtx,
-    ) -> VortexResult<Option<Canonical>> {
+    ) -> VortexResult<Option<ArrayRef>> {
         _ = (array, parent, child_idx, ctx);
         Ok(None)
     }
@@ -186,21 +188,6 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         _ = (array, parent, child_idx);
-        Ok(None)
-    }
-
-    /// Perform a constant-time slice of the array.
-    ///
-    /// If an encoding cannot perform this slice in constant time, it should instead return Ok(None).
-    ///
-    /// This function returns [`ArrayRef`] since some encodings can return a simpler array for
-    /// some slices, for example a [`crate::arrays::ChunkedArray`] may slice into a single chunk.
-    ///
-    /// ## Preconditions
-    ///
-    /// Bounds-checking has already been performed by the time this function is called.
-    fn slice(array: &Self::Array, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
-        _ = (array, range);
         Ok(None)
     }
 }

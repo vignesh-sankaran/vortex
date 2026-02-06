@@ -47,7 +47,15 @@ def parse_queries(value: str | None) -> list[int] | None:
     """Parse comma-separated query numbers."""
     if not value:
         return None
-    return [int(q.strip()) for q in value.split(",")]
+
+    result = set()
+    for part in value.split(","):
+        if "-" in part:
+            start, end = part.split("-", 1)
+            result.update(range(int(start), int(end) + 1))
+        else:
+            result.add(int(part))
+    return sorted(result)
 
 
 def run_ref_auto_complete() -> list[str]:
@@ -69,6 +77,7 @@ def run(
     label: Annotated[str | None, typer.Option("--label", "-l", help="Label for this run")] = None,
     track_memory: Annotated[bool, typer.Option("--track-memory", help="Track memory usage")] = False,
     samply: Annotated[bool, typer.Option("--samply", help="Record a profile using samply")] = False,
+    sample_rate: Annotated[int, typer.Option("--sample-rate", help="Sample rate to run samply with")] = None,
     build: Annotated[bool, typer.Option("--build/--no-build", help="Build binaries before running")] = True,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Log underlying commands")] = False,
     options: Annotated[list[str] | None, typer.Option("--opt", help="Engine or benchmark specific options")] = None,
@@ -152,6 +161,7 @@ def run(
                     options=bench_opts,
                     track_memory=track_memory,
                     samply=samply,
+                    sample_rate=sample_rate,
                     on_result=ctx.write_raw_json,
                 )
                 console.print(f"[green]{eng.value}: {len(results)} results[/green]")

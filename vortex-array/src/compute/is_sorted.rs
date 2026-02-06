@@ -255,13 +255,13 @@ fn is_sorted_impl(
 
     // Enforce strictness before we even try to check if the array is sorted.
     if strict {
-        let invalid_count = array.invalid_count();
+        let invalid_count = array.invalid_count()?;
         match invalid_count {
             // We can keep going
             0 => {}
             // If we have a potential null value - it has to be the first one.
             1 => {
-                if !array.is_invalid(0) {
+                if !array.is_invalid(0)? {
                     return Ok(Some(false));
                 }
             }
@@ -278,9 +278,6 @@ fn is_sorted_impl(
         if let Some(output) = kernel.invoke(&args)? {
             return Ok(output.unwrap_scalar()?.as_bool().value());
         }
-    }
-    if let Some(output) = array.invoke(&IS_SORTED_FN, &args)? {
-        return Ok(output.unwrap_scalar()?.as_bool().value());
     }
 
     if !array.is_canonical() {

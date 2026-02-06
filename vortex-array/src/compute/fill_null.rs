@@ -104,11 +104,11 @@ impl ComputeFnVTable for FillNull {
     ) -> VortexResult<Output> {
         let FillNullArgs { array, fill_value } = FillNullArgs::try_from(args)?;
 
-        if !array.dtype().is_nullable() || array.all_valid() {
+        if !array.dtype().is_nullable() || array.all_valid()? {
             return Ok(cast(array, fill_value.dtype())?.into());
         }
 
-        if array.all_invalid() {
+        if array.all_invalid()? {
             return Ok(ConstantArray::new(fill_value.clone(), array.len())
                 .into_array()
                 .into());
@@ -122,9 +122,6 @@ impl ComputeFnVTable for FillNull {
             if let Some(output) = kernel.invoke(args)? {
                 return Ok(output);
             }
-        }
-        if let Some(output) = array.invoke(&FILL_NULL_FN, args)? {
-            return Ok(output);
         }
 
         tracing::debug!("FillNullFn not implemented for {}", array.encoding_id());

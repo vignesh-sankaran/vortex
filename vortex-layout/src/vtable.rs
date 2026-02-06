@@ -67,7 +67,6 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
         session: &VortexSession,
     ) -> VortexResult<LayoutReaderRef>;
 
-    /// Create a new v2 reader for the layout.
     fn new_reader2(
         layout: &Self::Layout,
         segment_source: &SegmentSourceRef,
@@ -76,15 +75,6 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
         let _ = (layout, segment_source, session);
         vortex_bail!("new_reader2 not implemented for this layout")
     }
-
-    #[cfg(gpu_unstable)]
-    /// Create a new reader for the layout that uses a gpu device
-    fn new_gpu_reader(
-        layout: &Self::Layout,
-        name: Arc<str>,
-        segment_source: Arc<dyn SegmentSource>,
-        ctx: Arc<cudarc::driver::CudaContext>,
-    ) -> VortexResult<crate::gpu::GpuLayoutReaderRef>;
 
     /// Construct a new [`Layout`] from the provided parts.
     fn build(

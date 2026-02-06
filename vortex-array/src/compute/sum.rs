@@ -237,7 +237,7 @@ pub fn sum_impl(
     accumulator: &Scalar,
     kernels: &[ArcRef<dyn Kernel>],
 ) -> VortexResult<Scalar> {
-    if array.is_empty() || array.all_invalid() || accumulator.is_null() {
+    if array.is_empty() || array.all_invalid()? || accumulator.is_null() {
         return Ok(accumulator.clone());
     }
 
@@ -250,9 +250,6 @@ pub fn sum_impl(
         if let Some(output) = kernel.invoke(&args)? {
             return output.unwrap_scalar();
         }
-    }
-    if let Some(output) = array.invoke(&SUM_FN, &args)? {
-        return output.unwrap_scalar();
     }
 
     // Otherwise, canonicalize and try again.
