@@ -3,9 +3,9 @@
 
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
+use vortex_error::vortex_bail;
 use vortex_error::vortex_err;
-use vortex_vector::Datum;
-use vortex_vector::Scalar;
+use vortex_scalar::Scalar;
 
 use crate::Array;
 use crate::ArrayRef;
@@ -19,7 +19,9 @@ use crate::expr::Expression;
 use crate::expr::SimplifyCtx;
 use crate::expr::VTable;
 use crate::expr::VTableExt;
+use crate::expr::stats::Precision;
 use crate::expr::stats::Stat;
+use crate::expr::stats::StatsProvider;
 
 /// Creates a new expression that returns a minimum bound of its input.
 pub fn statistic(stat: Stat, child: Expression) -> Expression {
@@ -57,18 +59,28 @@ impl VTable for Statistic {
             .map(|dt| dt.as_nullable())
     }
 
-    fn evaluate(
-        &self,
-        _stat: &Stat,
-        expr: &Expression,
-        scope: &ArrayRef,
-    ) -> VortexResult<ArrayRef> {
-        let return_dtype = expr.return_dtype(scope.dtype())?;
-        Ok(ConstantArray::new(vortex_scalar::Scalar::null(return_dtype), scope.len()).into_array())
-    }
+    fn execute(&self, stat: &Stat, args: ExecutionArgs) -> VortexResult<ArrayRef> {
+        // FIXME(ngates): we should implement this as a reduction rule instead?
+        let Some(stat_dtype) = stat.dtype(args.inputs[0].dtype()) else {
+            vortex_bail!(
+                "Statistic {:?} not supported for dtype {:?}",
+                stat,
+                args.inputs[0].dtype()
+            );
+        };
 
-    fn execute(&self, _stat: &Stat, args: ExecutionArgs) -> VortexResult<Datum> {
-        Ok(Datum::Scalar(Scalar::null(&args.return_dtype)))
+        Ok(match args.inputs[0].statistics().get(*stat) {
+            // TODO(ngates): do we care about precision here? Possibly we should configure in the
+            //  options of the expression.
+            Some(Precision::Exact(v)) => {
+                // We have an exact value for the statistic; so we return a constant array
+                // with that value.
+                ConstantArray::new(v, args.row_count).into_array()
+            }
+            None | Some(Precision::Inexact(_)) => {
+                ConstantArray::new(Scalar::null(stat_dtype), args.row_count).into_array()
+            }
+        })
     }
 
     fn simplify(

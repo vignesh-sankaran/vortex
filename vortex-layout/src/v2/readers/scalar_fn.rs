@@ -9,6 +9,7 @@ use futures::future::BoxFuture;
 use futures::future::try_join_all;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
+use vortex_array::MaskFuture;
 use vortex_array::arrays::ScalarFnArray;
 use vortex_array::expr::Expression;
 use vortex_array::expr::ScalarFn;
@@ -17,7 +18,6 @@ use vortex_array::expr::VTableExt;
 use vortex_array::optimizer::ArrayOptimizer;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
-use vortex_mask::Mask;
 
 use crate::v2::reader::Reader;
 use crate::v2::reader::ReaderRef;
@@ -71,6 +71,10 @@ impl Reader for ScalarFnReader {
         self.row_count
     }
 
+    fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef> {
+        todo!()
+    }
+
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
         let input_streams = self
             .children
@@ -107,7 +111,7 @@ impl ReaderStream for ScalarFnArrayStream {
 
     fn next_chunk(
         &mut self,
-        selection: &Mask,
+        selection: MaskFuture,
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
         let scalar_fn = self.scalar_fn.clone();
         let len = selection.true_count();

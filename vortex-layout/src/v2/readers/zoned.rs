@@ -5,17 +5,15 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
-use vortex_array::expr::GetItem;
-use vortex_array::expr::Statistic;
+use vortex_array::expr::Expression;
 use vortex_array::expr::stats::Stat;
 use vortex_dtype::DType;
-use vortex_dtype::FieldName;
 use vortex_error::VortexResult;
+use vortex_error::vortex_bail;
 
 use crate::v2::reader::Reader;
 use crate::v2::reader::ReaderRef;
 use crate::v2::reader::ReaderStreamRef;
-use crate::v2::readers::scalar_fn::ScalarFnReaderExt;
 
 pub struct ZonedReader {
     data: ReaderRef,
@@ -37,37 +35,29 @@ impl Reader for ZonedReader {
         self.data.row_count()
     }
 
-    fn try_reduce_parent(
-        &self,
-        parent: &ReaderRef,
-        _child_idx: usize,
-    ) -> VortexResult<Option<ReaderRef>> {
-        if let Some(stat) = parent.as_scalar_fn::<Statistic>() {
-            if !self.present_stats.contains(stat) {
-                return Ok(None);
-            }
+    fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef> {
+        // We need to apply the expression to both the data and the zone map.
+        let new_data = self.data.apply(expression)?;
+        let new_zone_map = self.zone_map.apply(expression)?;
 
-            // We know the statistic is present; so we return a new reader that pulls the value
-            // from the zone map.
-            let zoned_statistic = GetItem.new_reader(
-                // FIXME(ngates): construct the field name properly
-                FieldName::from(stat.name()),
-                vec![self.zone_map.clone()],
-                self.zone_map.row_count(),
-            )?;
+        // We also need to update the present stats for the new zone map.
+        let new_present_stats = self
+            .present_stats
+            .iter()
+            .map(|stat| match stat {
+                Stat::Min => Stat::Min,
+                Stat::Max => Stat::Max,
+                Stat::NullCount => Stat::NullCount,
+                _ => vortex_bail!("Unsupported stat for zoned reader: {:?}", stat),
+            })
+            .collect();
 
-            // We now need to explode the zoned_statistic to match the data reader's row count.
-            // We do this based on the zone map's zone length.
-            let exploded_statistic = Arc::new(ZonedExpansionReader {
-                zoned: zoned_statistic,
-                zone_len: self.zone_len,
-                row_count: self.data.row_count(),
-            });
-
-            return Ok(Some(exploded_statistic));
-        }
-
-        Ok(None)
+        Ok(Arc::new(ZonedReader {
+            data: new_data,
+            zone_map: new_zone_map,
+            zone_len: self.zone_len,
+            present_stats: Arc::new(new_present_stats),
+        }))
     }
 
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
@@ -98,7 +88,11 @@ impl Reader for ZonedExpansionReader {
         self.row_count
     }
 
-    fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
+    fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef> {
+        todo!()
+    }
+
+    fn execute(&self, _row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
         todo!()
     }
 }

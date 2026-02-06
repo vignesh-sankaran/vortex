@@ -3,29 +3,41 @@
 
 use std::any::Any;
 use std::ops::Range;
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use moka::future::FutureExt;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
+use vortex_array::MaskFuture;
 use vortex_array::arrays::ConstantArray;
+use vortex_array::expr::Expression;
+use vortex_array::expr::root;
+use vortex_array::expr::transform::replace;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
-use vortex_mask::Mask;
 use vortex_scalar::Scalar;
 
 use crate::v2::reader::Reader;
+use crate::v2::reader::ReaderRef;
 use crate::v2::reader::ReaderStream;
 use crate::v2::reader::ReaderStreamRef;
 
 pub struct ConstantReader {
     scalar: Scalar,
     row_count: u64,
+
+    // Optional expression to apply to the constant value.
+    expression: Option<Expression>,
 }
 
 impl ConstantReader {
     pub fn new(scalar: Scalar, row_count: u64) -> Self {
-        Self { scalar, row_count }
+        Self {
+            scalar,
+            row_count,
+            expression: None,
+        }
     }
 }
 
@@ -42,11 +54,27 @@ impl Reader for ConstantReader {
         self.row_count
     }
 
+    fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef> {
+        Ok(match &self.expression {
+            None => Arc::new(Self {
+                scalar: self.scalar.clone(),
+                row_count: self.row_count,
+                expression: Some(expression.clone()),
+            }),
+            Some(existing) => Arc::new(Self {
+                scalar: self.scalar.clone(),
+                row_count: self.row_count,
+                expression: Some(replace(existing.clone(), &root(), expression.clone())),
+            }),
+        })
+    }
+
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
         let remaining = row_range.end.saturating_sub(row_range.start);
         Ok(Box::new(ConstantReaderStream {
             scalar: self.scalar.clone(),
             remaining,
+            expression: self.expression.clone(),
         }))
     }
 }
@@ -54,6 +82,7 @@ impl Reader for ConstantReader {
 struct ConstantReaderStream {
     scalar: Scalar,
     remaining: u64,
+    expression: Option<Expression>,
 }
 
 impl ReaderStream for ConstantReaderStream {
@@ -71,9 +100,17 @@ impl ReaderStream for ConstantReaderStream {
 
     fn next_chunk(
         &mut self,
-        mask: &Mask,
+        mask: MaskFuture,
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
-        let array = ConstantArray::new(self.scalar.clone(), mask.true_count()).into_array();
-        Ok(async move { Ok(array) }.boxed())
+        let expression = self.expression.clone();
+        Ok(async move {
+            let mask = mask.await?;
+            let mut array = ConstantArray::new(self.scalar.clone(), mask.true_count()).into_array();
+            if let Some(e) = expression {
+                array = array.apply(&e)?;
+            }
+            Ok(array)
+        }
+        .boxed())
     }
 }

@@ -7,18 +7,18 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use vortex_array::ArrayRef;
+use vortex_array::MaskFuture;
+use vortex_array::expr::Expression;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
-use vortex_mask::Mask;
 
 pub type ReaderRef = Arc<dyn Reader>;
 
 /// A reader provides an interface for loading data from row-indexed layouts.
 ///
-/// Unlike a [`super::source::DataSource`], readers have a concrete row count allowing fixed
-/// partitions over a known set of rows. Readers are driven by providing an input stream of
-/// array data that can be used to provide arguments to parameterized filter and projection
-/// expressions.
+/// Readers have a concrete row count allowing fixed partitions over a known set of rows. Readers
+/// are driven by asking for the next chunk size, before providing a [`MaskFuture`] that resolves
+/// into a mask of that length.
 pub trait Reader: 'static + Send + Sync {
     /// Downcast the reader to a concrete type.
     fn as_any(&self) -> &dyn Any;
@@ -29,20 +29,9 @@ pub trait Reader: 'static + Send + Sync {
     /// Returns the number of rows in the reader.
     fn row_count(&self) -> u64;
 
-    /// Reduces the reader, simplifying its internal structure if possible.
-    fn try_reduce(&self) -> VortexResult<Option<ReaderRef>> {
-        Ok(None)
-    }
-
-    /// Reduce the parent reader if possible, returning a new reader if successful.
-    fn try_reduce_parent(
-        &self,
-        parent: &ReaderRef,
-        child_idx: usize,
-    ) -> VortexResult<Option<ReaderRef>> {
-        let _ = (parent, child_idx);
-        Ok(None)
-    }
+    /// Apply an expression to the reader, returning a new reader that will execute the expression
+    /// on top of the current reader.
+    fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef>;
 
     /// Creates a scan over the given row range of the reader.
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef>;
@@ -59,6 +48,13 @@ pub trait ReaderStream: 'static + Send + Sync {
     /// Returns [`None`] if there are no more chunks.
     fn next_chunk_len(&self) -> Option<usize>;
 
+    /// Skip the next `n` rows of the stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is greater than the number of rows remaining in the stream..
+    fn skip(&mut self, n: usize);
+
     /// Returns the next chunk of data given an input array.
     ///
     /// The returned chunk must have the same number of rows as the [`Mask::true_count`].
@@ -68,6 +64,9 @@ pub trait ReaderStream: 'static + Send + Sync {
     /// arbitrarily far without awaiting any data.
     fn next_chunk(
         &mut self,
-        mask: &Mask,
+        mask: MaskFuture,
+        // TODO(ngates): it would be good to pass an object here that has some lifetime, and this
+        //  object is required to construct segment futures. That way the implementation is forced
+        //  to construct segment futures in this call in order to satisfy the static result lifetime.
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>>;
 }

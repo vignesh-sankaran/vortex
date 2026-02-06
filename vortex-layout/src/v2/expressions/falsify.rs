@@ -17,9 +17,6 @@ use vortex_dtype::DType;
 use vortex_dtype::Nullability;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
-use vortex_vector::Datum;
-use vortex_vector::Scalar;
-use vortex_vector::bool::BoolScalar;
 
 /// An expression that evaluates to true when the predicate is provably false, without evaluating
 /// it.

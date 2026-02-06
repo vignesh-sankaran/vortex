@@ -11,7 +11,6 @@ use vortex_array::ArrayRef;
 use vortex_array::expr::Expression;
 use vortex_array::expr::root;
 use vortex_array::stream::ArrayStream;
-use vortex_array::stream::SendableArrayStream;
 use vortex_buffer::Buffer;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
@@ -94,25 +93,18 @@ impl ScanBuilder2 {
         let filter_reader = filter.as_ref().map(|f| self.reader.apply(&f)).transpose()?;
         let projection_reader = self.reader.apply(&projection)?;
 
-        // And finally, we wrap the reader for pruning.
-        let pruning_reader = filter
-            .as_ref()
-            .map(|f| {
-                // TODO(ngates): wrap filter in `falsify` expression.
-                let f = f.falsify()?;
-                self.reader.apply(&f)
-            })
-            .transpose()?;
-
-        let reader_stream = self.reader.execute(self.row_range)?;
-
-        Ok(Scan { dtype })
+        Ok(Scan {
+            dtype,
+            filter_reader,
+            projection_reader,
+        })
     }
 }
 
 struct Scan {
     dtype: DType,
-    stream: SendableArrayStream,
+    filter_reader: Option<ReaderRef>,
+    projection_reader: ReaderRef,
 }
 
 impl ArrayStream for Scan {
@@ -124,7 +116,7 @@ impl ArrayStream for Scan {
 impl Stream for Scan {
     type Item = VortexResult<ArrayRef>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         todo!()
     }
 }

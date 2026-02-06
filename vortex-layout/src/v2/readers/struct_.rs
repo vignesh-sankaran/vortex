@@ -6,14 +6,16 @@ use std::ops::Range;
 
 use futures::future::BoxFuture;
 use futures::future::try_join_all;
+use futures::try_join;
 use moka::future::FutureExt;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
+use vortex_array::MaskFuture;
 use vortex_array::arrays::StructArray;
+use vortex_array::expr::Expression;
 use vortex_array::validity::Validity;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
-use vortex_mask::Mask;
 
 use crate::v2::reader::Reader;
 use crate::v2::reader::ReaderRef;
@@ -38,6 +40,10 @@ impl Reader for StructReader {
 
     fn row_count(&self) -> u64 {
         self.row_count
+    }
+
+    fn apply(&self, _expression: &Expression) -> VortexResult<ReaderRef> {
+        todo!()
     }
 
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
@@ -72,25 +78,34 @@ impl ReaderStream for StructReaderStream {
             .flatten()
     }
 
+    fn skip(&mut self, n: usize) {
+        for field in &mut self.fields {
+            field.skip(n);
+        }
+    }
+
     fn next_chunk(
         &mut self,
-        selection: &Mask,
+        selection: MaskFuture,
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
         let struct_fields = self.dtype.as_struct_fields().clone();
         let validity: Validity = self.dtype.nullability().into();
         let fields = self
             .fields
             .iter_mut()
-            .map(|s| s.next_chunk(selection))
+            .map(|s| s.next_chunk(selection.clone()))
             .collect::<VortexResult<Vec<_>>>()?;
-        let len = selection.true_count();
 
         Ok(async move {
-            let fields = try_join_all(fields).await?;
-            Ok(
-                StructArray::try_new_with_dtype(fields, struct_fields, len, validity.clone())?
-                    .into_array(),
-            )
+            let fields = try_join_all(fields);
+            let (fields, mask) = try_join!(fields, selection)?;
+            Ok(StructArray::try_new_with_dtype(
+                fields,
+                struct_fields,
+                mask.true_count(),
+                validity.clone(),
+            )?
+            .into_array())
         }
         .boxed())
     }
