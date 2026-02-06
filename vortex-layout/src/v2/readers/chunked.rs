@@ -6,18 +6,10 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
-use futures::future::try_join_all;
-use moka::future::FutureExt;
-use vortex_array::ArrayRef;
-use vortex_array::IntoArray;
-use vortex_array::MaskFuture;
-use vortex_array::arrays::ChunkedArray;
+use vortex_array::ArrayFuture;
 use vortex_array::expr::Expression;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
-use vortex_error::vortex_bail;
-use vortex_error::vortex_err;
 use vortex_error::vortex_panic;
 
 use crate::v2::reader::Reader;
@@ -121,15 +113,12 @@ struct ChunkedReaderStream {
 }
 
 impl ChunkedReaderStream {
-    /// Ensure we have an active stream pointing at the next non-exhausted chunk.
+    /// Ensure we have an active stream pointing at a non-exhausted chunk.
+    /// Returns `Ok(true)` if a stream is ready, `Ok(false)` if no more chunks.
     fn ensure_active_stream(&mut self) -> VortexResult<bool> {
         loop {
-            if let Some(ref stream) = self.active_stream {
-                if stream.next_chunk_len().is_some() {
-                    return Ok(true);
-                }
-                // Current stream is exhausted, drop it.
-                self.active_stream = None;
+            if self.active_stream.is_some() {
+                return Ok(true);
             }
 
             // Try to activate the next pending chunk.
@@ -146,32 +135,15 @@ impl ReaderStream for ChunkedReaderStream {
         &self.dtype
     }
 
-    fn next_chunk_len(&self) -> Option<usize> {
-        if let Some(ref stream) = self.active_stream {
-            let len = stream.next_chunk_len();
-            if len.is_some() {
-                return len;
-            }
-        }
-        // Peek at the next pending chunk's row count as a hint.
-        self.pending_chunks
-            .front()
-            .map(|c| usize::try_from(c.row_range.end - c.row_range.start).unwrap_or(usize::MAX))
-    }
-
     fn skip(&mut self, mut n: usize) {
         while n > 0 {
             // Try to skip within the active stream.
             if let Some(ref mut stream) = self.active_stream {
-                if let Some(chunk_len) = stream.next_chunk_len() {
-                    if n <= chunk_len {
-                        stream.skip(n);
-                        return;
-                    }
-                    stream.skip(chunk_len);
-                    n -= chunk_len;
-                }
-                self.active_stream = None;
+                // We don't know the stream's remaining length without next_chunk_len,
+                // so we try to skip and if there's no more data, move on.
+                // For skip, the contract says n must not exceed remaining, so we delegate.
+                stream.skip(n);
+                return;
             }
 
             // Skip entire pending chunks without constructing streams.
@@ -185,7 +157,6 @@ impl ReaderStream for ChunkedReaderStream {
                 n -= chunk_rows;
             } else {
                 // Partial skip — construct the stream and skip within it.
-                // We just checked front() is Some, so pop_front() is guaranteed.
                 match self.pending_chunks.pop_front() {
                     Some(pending) => {
                         let mut stream = match pending.reader.execute(pending.row_range) {
@@ -202,55 +173,23 @@ impl ReaderStream for ChunkedReaderStream {
         }
     }
 
-    fn next_chunk(
-        &mut self,
-        mask: MaskFuture,
-    ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
-        if !self.ensure_active_stream()? {
-            vortex_bail!("No more chunks in chunked reader stream");
-        }
-
-        let stream = self
-            .active_stream
-            .as_mut()
-            .ok_or_else(|| vortex_err!("Active stream missing after ensure"))?;
-        let next_len = stream
-            .next_chunk_len()
-            .ok_or_else(|| vortex_err!("Active stream unexpectedly exhausted"))?;
-
-        if mask.len() <= next_len {
-            return stream.next_chunk(mask);
-        }
-
-        // Mask spans multiple chunks — gather results from each.
-        let mut remaining_mask = mask;
-        let mut futs = Vec::new();
-
-        while !remaining_mask.is_empty() {
-            if !self.ensure_active_stream()? {
-                vortex_bail!("Ran out of chunks while processing mask");
+    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+        loop {
+            match self.ensure_active_stream() {
+                Ok(true) => {}
+                Ok(false) => return None,
+                Err(e) => return Some(Err(e)),
             }
 
-            let stream = self
-                .active_stream
-                .as_mut()
-                .ok_or_else(|| vortex_err!("Active stream missing after ensure"))?;
-            let chunk_len = stream
-                .next_chunk_len()
-                .ok_or_else(|| vortex_err!("Active stream unexpectedly exhausted"))?;
+            let stream = self.active_stream.as_mut()?;
 
-            let take = chunk_len.min(remaining_mask.len());
-            let chunk_mask = remaining_mask.slice(0..take);
-            remaining_mask = remaining_mask.slice(take..remaining_mask.len());
-
-            futs.push(stream.next_chunk(chunk_mask)?);
+            match stream.next_chunk() {
+                Some(result) => return Some(result),
+                None => {
+                    // Current stream is exhausted, try next chunk.
+                    self.active_stream = None;
+                }
+            }
         }
-
-        let dtype = self.dtype.clone();
-        Ok(async move {
-            let arrays = try_join_all(futs).await?;
-            Ok(ChunkedArray::try_new(arrays, dtype)?.into_array())
-        }
-        .boxed())
     }
 }

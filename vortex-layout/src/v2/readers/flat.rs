@@ -9,11 +9,8 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::Shared;
 use vortex_array::ArrayContext;
+use vortex_array::ArrayFuture;
 use vortex_array::ArrayRef;
-use vortex_array::Canonical;
-use vortex_array::IntoArray;
-use vortex_array::MaskFuture;
-use vortex_array::buffer::BufferHandle;
 use vortex_array::expr::Expression;
 use vortex_array::expr::root;
 use vortex_array::expr::transform::replace;
@@ -34,7 +31,7 @@ use crate::v2::reader::ReaderRef;
 use crate::v2::reader::ReaderStream;
 use crate::v2::reader::ReaderStreamRef;
 
-type SharedSegmentFuture = Shared<BoxFuture<'static, SharedVortexResult<BufferHandle>>>;
+type SharedArrayFuture = Shared<BoxFuture<'static, SharedVortexResult<ArrayRef>>>;
 
 /// A leaf reader that reads a single flat segment.
 ///
@@ -123,21 +120,30 @@ impl Reader for FlatReader {
             );
         }
 
-        // Request the segment once and share across all next_chunk calls.
-        let segment_fut = self
-            .segment_source
-            .request(self.segment_id)
-            .map(|r| r.map_err(Arc::new))
-            .boxed()
-            .shared();
+        // Decode the array once and share the result across all next_chunk calls.
+        let segment_source = self.segment_source.clone();
+        let segment_id = self.segment_id;
+        let array_tree = self.array_tree.clone();
+        let decode_dtype = self.decode_dtype.clone();
+        let row_count = self.len;
+        let ctx = self.ctx.clone();
+        let registry = self.registry.clone();
+        let array_fut = async move {
+            let segment = segment_source.request(segment_id).await?;
+            let parts = if let Some(array_tree) = array_tree {
+                ArrayParts::from_flatbuffer_and_segment(array_tree, segment)?
+            } else {
+                ArrayParts::try_from(segment)?
+            };
+            parts.decode(&decode_dtype, row_count, &ctx, &registry)
+        }
+        .map(|r| r.map_err(Arc::new))
+        .boxed()
+        .shared();
 
         Ok(Box::new(FlatReaderStream {
             dtype: self.dtype.clone(),
-            decode_dtype: self.decode_dtype.clone(),
-            segment_fut,
-            array_tree: self.array_tree.clone(),
-            ctx: self.ctx.clone(),
-            registry: self.registry.clone(),
+            array_fut,
             expression: self.expression.clone(),
             row_count: self.len,
             offset: start,
@@ -148,11 +154,7 @@ impl Reader for FlatReader {
 
 struct FlatReaderStream {
     dtype: DType,
-    decode_dtype: DType,
-    segment_fut: SharedSegmentFuture,
-    array_tree: Option<ByteBuffer>,
-    ctx: ArrayContext,
-    registry: ArrayRegistry,
+    array_fut: SharedArrayFuture,
     expression: Option<Expression>,
     row_count: usize,
     offset: usize,
@@ -164,14 +166,6 @@ impl ReaderStream for FlatReaderStream {
         &self.dtype
     }
 
-    fn next_chunk_len(&self) -> Option<usize> {
-        if self.remaining == 0 {
-            None
-        } else {
-            Some(self.remaining)
-        }
-    }
-
     fn skip(&mut self, n: usize) {
         if n > self.remaining {
             vortex_panic!("Cannot skip {} rows, only {} remaining", n, self.remaining);
@@ -180,60 +174,27 @@ impl ReaderStream for FlatReaderStream {
         self.remaining -= n;
     }
 
-    fn next_chunk(
-        &mut self,
-        mask: MaskFuture,
-    ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
-        if mask.len() > self.remaining {
-            vortex_bail!(
-                "Mask length {} exceeds remaining rows {}",
-                mask.len(),
-                self.remaining
-            );
+    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+        if self.remaining == 0 {
+            return None;
         }
 
-        let segment_fut = self.segment_fut.clone();
-        let array_tree = self.array_tree.clone();
-        let ctx = self.ctx.clone();
-        let registry = self.registry.clone();
+        let array_fut = self.array_fut.clone();
         let row_count = self.row_count;
         let offset = self.offset;
-        let len = mask.len();
+        let len = self.remaining;
         let expression = self.expression.clone();
-        let dtype = self.dtype.clone();
-        let decode_dtype = self.decode_dtype.clone();
 
         self.offset += len;
-        self.remaining -= len;
+        self.remaining = 0;
 
-        Ok(async move {
-            // Await the mask first — if all-false, skip I/O entirely.
-            // TODO(ngates): should we race this against the segment future?
-            let mask = mask.await?;
-            if mask.true_count() == 0 {
-                return Ok(Canonical::empty(&dtype).into_array());
-            }
-
-            // Await the shared segment future (I/O is issued once, shared across chunks).
-            let segment = segment_fut.await?;
-            let parts = if let Some(array_tree) = array_tree {
-                // Use the pre-stored flatbuffer from layout metadata combined with segment buffers.
-                ArrayParts::from_flatbuffer_and_segment(array_tree, segment)?
-            } else {
-                // Parse the flatbuffer from the segment itself.
-                ArrayParts::try_from(segment)?
-            };
-
-            let mut array = parts.decode(&decode_dtype, row_count, &ctx, &registry)?;
+        Some(Ok(ArrayFuture::new(len, async move {
+            // Await the shared array future (decoded once, shared across chunks).
+            let mut array: ArrayRef = array_fut.await?;
 
             // Slice to the requested row range within the segment.
             if offset > 0 || len < row_count {
                 array = array.slice(offset..offset + len)?;
-            }
-
-            // Filter using the mask.
-            if !mask.all_true() {
-                array = array.filter(mask)?;
             }
 
             // Apply any accumulated expression.
@@ -242,7 +203,6 @@ impl ReaderStream for FlatReaderStream {
             }
 
             Ok(array)
-        }
-        .boxed())
+        })))
     }
 }

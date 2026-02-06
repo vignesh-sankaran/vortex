@@ -65,6 +65,12 @@ impl DataSource for LayoutReaderDataSource {
             builder = builder.with_limit(limit);
         }
 
+        if let Some(row_range) = scan_request.row_range {
+            builder = builder.with_row_range(row_range);
+        }
+
+        builder = builder.with_selection(scan_request.row_selection);
+
         let scan = builder.prepare()?;
         let dtype = scan.dtype().clone();
         let splits = scan.execute(None)?;

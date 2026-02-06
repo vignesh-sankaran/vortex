@@ -16,6 +16,7 @@
 use std::sync::LazyLock;
 
 pub use array::*;
+pub use array_future::*;
 pub use canonical::*;
 pub use columnar::*;
 pub use context::*;
@@ -31,6 +32,7 @@ pub mod accessor;
 #[doc(hidden)]
 pub mod aliases;
 mod array;
+mod array_future;
 pub mod arrays;
 pub mod arrow;
 pub mod buffer;

@@ -5,9 +5,7 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
-use vortex_array::ArrayRef;
-use vortex_array::MaskFuture;
+use vortex_array::ArrayFuture;
 use vortex_array::expr::Expression;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
@@ -17,8 +15,7 @@ pub type ReaderRef = Arc<dyn Reader>;
 /// A reader provides an interface for loading data from row-indexed layouts.
 ///
 /// Readers have a concrete row count allowing fixed partitions over a known set of rows. Readers
-/// are driven by asking for the next chunk size, before providing a [`MaskFuture`] that resolves
-/// into a mask of that length.
+/// are driven by calling `next_chunk()` which returns an [`ArrayFuture`] with a known length.
 pub trait Reader: 'static + Send + Sync {
     /// Downcast the reader to a concrete type.
     fn as_any(&self) -> &dyn Any;
@@ -39,31 +36,21 @@ pub trait Reader: 'static + Send + Sync {
 
 pub type ReaderStreamRef = Box<dyn ReaderStream>;
 
+/// A stream of array chunks from a reader.
+///
+/// Each call to `next_chunk()` returns an [`ArrayFuture`] whose length is determined by
+/// the reader (not the caller). Returns `None` when the stream is exhausted.
 pub trait ReaderStream: 'static + Send + Sync {
     /// The data type of the returned data.
     fn dtype(&self) -> &DType;
-
-    /// The preferred maximum row count for the next chunk.
-    ///
-    /// Returns [`None`] if there are no more chunks.
-    fn next_chunk_len(&self) -> Option<usize>;
 
     /// Skip the next `n` rows of the stream.
     ///
     /// # Panics
     ///
-    /// Panics if `n` is greater than the number of rows remaining in the stream..
+    /// Panics if `n` is greater than the number of rows remaining in the stream.
     fn skip(&mut self, n: usize);
 
-    /// Returns the next chunk of data given an input array.
-    ///
-    /// The returned chunk must have the same number of rows as the [`Mask::true_count`].
-    /// The provided mask will have at most [`next_chunk_len`] rows.
-    ///
-    /// The returned future has a `'static` lifetime allowing the calling to drive the stream
-    /// arbitrarily far without awaiting any data.
-    fn next_chunk(
-        &mut self,
-        mask: MaskFuture,
-    ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>>;
+    /// Returns the next chunk of data as an [`ArrayFuture`], or `None` if no more chunks.
+    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>>;
 }

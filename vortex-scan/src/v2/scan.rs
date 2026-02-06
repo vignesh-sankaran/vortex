@@ -9,8 +9,8 @@ use std::task::Poll;
 
 use futures::Stream;
 use futures::future::BoxFuture;
+use vortex_array::ArrayFuture;
 use vortex_array::ArrayRef;
-use vortex_array::MaskFuture;
 use vortex_array::expr::Expression;
 use vortex_array::expr::root;
 use vortex_array::stream::ArrayStream;
@@ -19,6 +19,7 @@ use vortex_dtype::DType;
 use vortex_error::VortexResult;
 use vortex_layout::v2::reader::ReaderRef;
 use vortex_layout::v2::reader::ReaderStreamRef;
+use vortex_mask::Mask;
 use vortex_session::VortexSession;
 
 use crate::Selection;
@@ -113,6 +114,8 @@ impl ScanBuilder2 {
             rows_produced: 0,
             row_selection: self.row_selection,
             row_offset,
+            filter_buffer: None,
+            projection_buffer: None,
         })
     }
 }
@@ -126,6 +129,80 @@ struct Scan {
     rows_produced: u64,
     row_selection: Selection,
     row_offset: u64,
+    filter_buffer: Option<ArrayFuture>,
+    projection_buffer: Option<ArrayFuture>,
+}
+
+impl Scan {
+    /// Get the next projection chunk, consuming from the buffer first.
+    fn next_projection_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+        if let Some(buffered) = self.projection_buffer.take() {
+            return Some(Ok(buffered));
+        }
+        self.projection_stream.next_chunk()
+    }
+
+    /// Get the next filter chunk, consuming from the buffer first.
+    fn next_filter_chunk(
+        stream: &mut ReaderStreamRef,
+        buffer: &mut Option<ArrayFuture>,
+    ) -> Option<VortexResult<ArrayFuture>> {
+        if let Some(buffered) = buffer.take() {
+            return Some(Ok(buffered));
+        }
+        stream.next_chunk()
+    }
+
+    /// Collect filter chunks covering exactly `n` rows.
+    /// Returns a vec of ArrayFutures whose total len == n.
+    fn collect_filter_chunks(&mut self, n: usize) -> Option<VortexResult<Vec<ArrayFuture>>> {
+        let filter_stream = self.filter_stream.as_mut()?;
+        let mut chunks = Vec::new();
+        let mut remaining = n;
+
+        while remaining > 0 {
+            let chunk = match Self::next_filter_chunk(filter_stream, &mut self.filter_buffer) {
+                Some(Ok(f)) => f,
+                Some(Err(e)) => return Some(Err(e)),
+                None => {
+                    return Some(Err(vortex_error::vortex_err!(
+                        "Filter stream exhausted before covering {} rows",
+                        n
+                    )));
+                }
+            };
+
+            if chunk.len() <= remaining {
+                remaining -= chunk.len();
+                chunks.push(chunk);
+            } else {
+                // Buffer the remainder.
+                let used = chunk.slice(0..remaining);
+                self.filter_buffer = Some(chunk.slice(remaining..chunk.len()));
+                remaining = 0;
+                chunks.push(used);
+            }
+        }
+
+        Some(Ok(chunks))
+    }
+
+    /// Skip `n` rows in the filter stream, consuming from the buffer first.
+    fn skip_filter(&mut self, n: usize) {
+        let mut remaining = n;
+        if let Some(buf) = self.filter_buffer.take() {
+            if remaining < buf.len() {
+                self.filter_buffer = Some(buf.slice(remaining..buf.len()));
+                return;
+            }
+            remaining -= buf.len();
+        }
+        if remaining > 0
+            && let Some(filter_stream) = &mut self.filter_stream
+        {
+            filter_stream.skip(remaining);
+        }
+    }
 }
 
 impl ArrayStream for Scan {
@@ -163,75 +240,104 @@ impl Stream for Scan {
                 return Poll::Ready(None);
             }
 
-            // Determine the next chunk size from the projection stream.
-            let proj_chunk_len = this.projection_stream.next_chunk_len();
-
-            // If a filter stream exists, synchronize chunk sizes.
-            let chunk_len = if let Some(filter_stream) = &this.filter_stream {
-                match (proj_chunk_len, filter_stream.next_chunk_len()) {
-                    (Some(p), Some(f)) => Some(p.min(f)),
-                    _ => None,
-                }
-            } else {
-                proj_chunk_len
+            // Get the next projection chunk.
+            let proj_future = match this.next_projection_chunk() {
+                Some(Ok(f)) => f,
+                Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+                None => return Poll::Ready(None),
             };
 
-            let Some(mut chunk_len) = chunk_len else {
-                return Poll::Ready(None);
-            };
+            let mut chunk_len = proj_future.len();
 
-            // Limit the chunk size to avoid exceeding the row limit.
+            // Apply limit: if remaining < chunk_len, slice the projection future.
             if let Some(limit) = this.limit {
                 let remaining = usize::try_from(limit - this.rows_produced).unwrap_or(usize::MAX);
-                chunk_len = chunk_len.min(remaining);
-                if chunk_len == 0 {
-                    return Poll::Ready(None);
+                if remaining < chunk_len {
+                    // Buffer the remainder and use only what we need.
+                    this.projection_buffer = Some(proj_future.slice(remaining..chunk_len));
+                    chunk_len = remaining;
                 }
+            }
+
+            let proj_future = if chunk_len < proj_future.len() {
+                proj_future.slice(0..chunk_len)
+            } else {
+                proj_future
+            };
+
+            if chunk_len == 0 {
+                return Poll::Ready(None);
             }
 
             // Compute the selection mask for this chunk's row range.
             let chunk_row_range = this.row_offset..this.row_offset + chunk_len as u64;
             let selection_mask = this.row_selection.row_mask(&chunk_row_range).mask().clone();
 
-            // If all rows are excluded by selection, skip this chunk entirely.
+            // If all rows are excluded by selection, skip this chunk entirely (no I/O).
             if selection_mask.all_false() {
-                if let Some(filter_stream) = &mut this.filter_stream {
-                    filter_stream.skip(chunk_len);
-                }
-                this.projection_stream.skip(chunk_len);
+                this.skip_filter(chunk_len);
                 this.row_offset += chunk_len as u64;
                 continue;
             }
 
-            // Build the mask chain: evaluate filter (if present), then AND with selection.
-            let mask = if let Some(filter_stream) = &mut this.filter_stream {
-                let all_true = MaskFuture::new_true(chunk_len);
-                let filter_fut = match filter_stream.next_chunk(all_true) {
-                    Ok(fut) => fut,
-                    Err(e) => return Poll::Ready(Some(Err(e))),
-                };
-                MaskFuture::new(chunk_len, async move {
-                    let filter_result = filter_fut.await?;
-                    let filter_mask = filter_result.try_to_mask_fill_null_false()?;
-                    if selection_mask.all_true() {
-                        Ok(filter_mask)
-                    } else {
-                        Ok((&filter_mask).bitand(&selection_mask))
-                    }
-                })
-            } else if selection_mask.all_true() {
-                MaskFuture::new_true(chunk_len)
-            } else {
-                MaskFuture::ready(selection_mask)
-            };
-
             this.row_offset += chunk_len as u64;
 
-            // Request the next projection chunk with the computed mask.
-            this.pending = Some(match this.projection_stream.next_chunk(mask) {
-                Ok(fut) => fut,
-                Err(e) => return Poll::Ready(Some(Err(e))),
-            });
+            // Build the pending future: await projection, apply filter + selection.
+            if this.filter_stream.is_some() {
+                let filter_chunks = match this.collect_filter_chunks(chunk_len) {
+                    Some(Ok(chunks)) => chunks,
+                    Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+                    None => {
+                        return Poll::Ready(Some(Err(vortex_error::vortex_err!(
+                            "Filter stream missing"
+                        ))));
+                    }
+                };
+
+                this.pending = Some(Box::pin(async move {
+                    // Await filter chunks and combine into a single mask.
+                    let mut filter_masks: Vec<Mask> = Vec::with_capacity(filter_chunks.len());
+                    for filter_chunk in filter_chunks {
+                        let filter_array = filter_chunk.await?;
+                        filter_masks.push(filter_array.try_to_mask_fill_null_false()?);
+                    }
+
+                    let filter_mask = if filter_masks.len() == 1 {
+                        filter_masks
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| Mask::new_true(0))
+                    } else {
+                        Mask::concat(filter_masks.iter())?
+                    };
+
+                    // AND with selection mask.
+                    let mask = if selection_mask.all_true() {
+                        filter_mask
+                    } else {
+                        (&filter_mask).bitand(&selection_mask)
+                    };
+
+                    // Await projection.
+                    let array = proj_future.await?;
+
+                    // Filter the projection array.
+                    if mask.all_true() {
+                        Ok(array)
+                    } else {
+                        array.filter(mask)
+                    }
+                }));
+            } else if selection_mask.all_true() {
+                // No filter, no selection masking — just await projection.
+                this.pending = Some(Box::pin(proj_future));
+            } else {
+                // No filter, but selection mask needs to be applied.
+                this.pending = Some(Box::pin(async move {
+                    let array = proj_future.await?;
+                    array.filter(selection_mask)
+                }));
+            }
 
             // Loop back to poll the newly created future.
         }

@@ -5,11 +5,8 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
-use moka::future::FutureExt;
-use vortex_array::ArrayRef;
+use vortex_array::ArrayFuture;
 use vortex_array::IntoArray;
-use vortex_array::MaskFuture;
 use vortex_array::arrays::ConstantArray;
 use vortex_array::expr::Expression;
 use vortex_array::expr::root;
@@ -87,14 +84,6 @@ impl ReaderStream for ConstantReaderStream {
         self.scalar.dtype()
     }
 
-    fn next_chunk_len(&self) -> Option<usize> {
-        if self.remaining == 0 {
-            None
-        } else {
-            Some(usize::try_from(self.remaining).unwrap_or(usize::MAX))
-        }
-    }
-
     fn skip(&mut self, n: usize) {
         let n = n as u64;
         if n > self.remaining {
@@ -103,22 +92,22 @@ impl ReaderStream for ConstantReaderStream {
         self.remaining -= n;
     }
 
-    fn next_chunk(
-        &mut self,
-        mask: MaskFuture,
-    ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
+    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+        if self.remaining == 0 {
+            return None;
+        }
+
+        let len = usize::try_from(self.remaining).unwrap_or(usize::MAX);
         let scalar = self.scalar.clone();
         let expression = self.expression.clone();
-        self.remaining = self.remaining.saturating_sub(mask.len() as u64);
+        self.remaining = 0;
 
-        Ok(async move {
-            let mask = mask.await?;
-            let mut array = ConstantArray::new(scalar, mask.true_count()).into_array();
+        Some(Ok(ArrayFuture::new(len, async move {
+            let mut array = ConstantArray::new(scalar, len).into_array();
             if let Some(e) = expression {
                 array = array.apply(&e)?;
             }
             Ok(array)
-        }
-        .boxed())
+        })))
     }
 }

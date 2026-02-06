@@ -20,6 +20,7 @@
 //!   example which encodings it knows about.
 
 use std::any::Any;
+use std::ops::Range;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -29,6 +30,8 @@ use vortex_array::stream::SendableArrayStream;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
 use vortex_session::VortexSession;
+
+use crate::Selection;
 
 /// Create a Vortex source from serialized configuration.
 ///
@@ -81,6 +84,10 @@ pub struct ScanRequest {
     pub filter: Option<Expression>,
     /// Optional limit on the number of rows to scan.
     pub limit: Option<u64>,
+    /// Optional row range to scan within the data source.
+    pub row_range: Option<Range<u64>>,
+    /// Row selection to apply within the row range.
+    pub row_selection: Selection,
 }
 
 /// A boxed data source scan.
@@ -123,7 +130,7 @@ pub trait Split: 'static + Send {
 }
 
 /// An estimate that can be exact, an upper bound, or unknown.
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum Estimate<T> {
     /// The exact value.
     Exact(T),
