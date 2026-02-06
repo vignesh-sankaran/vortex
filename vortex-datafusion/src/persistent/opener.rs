@@ -38,6 +38,7 @@ use vortex::error::VortexError;
 use vortex::error::VortexExpect;
 use vortex::file::OpenOptionsSessionExt;
 use vortex::io::InstrumentedReadAt;
+use vortex::io::session::RuntimeSessionExt;
 use vortex::layout::LayoutReader;
 use vortex::metrics::VortexMetrics;
 use vortex::scan::ScanBuilder;
@@ -264,7 +265,7 @@ impl FileOpener for VortexOpener {
             };
 
             // let mut scan_builder = ScanBuilder::new(session.clone(), layout_reader);
-            let mut scan_builder2 = ScanBuilder2::new(
+            let mut scan_builder = ScanBuilder2::new(
                 vxf.footer()
                     .layout()
                     .new_reader2(&vxf.segment_source(), &session)
@@ -272,19 +273,19 @@ impl FileOpener for VortexOpener {
                 session.clone(),
             );
 
-            if let Some(extensions) = file.extensions
-                && let Some(vortex_plan) = extensions.downcast_ref::<VortexAccessPlan>()
-            {
-                scan_builder = vortex_plan.apply_to_builder(scan_builder);
-            }
+            // if let Some(extensions) = file.extensions
+            //     && let Some(vortex_plan) = extensions.downcast_ref::<VortexAccessPlan>()
+            // {
+            //     scan_builder = vortex_plan.apply_to_builder(scan_builder);
+            // }
 
             if let Some(file_range) = file.range {
-                scan_builder = apply_byte_range(
-                    file_range,
-                    file.object_meta.size,
-                    vxf.row_count(),
-                    scan_builder,
-                );
+                // scan_builder = apply_byte_range(
+                //     file_range,
+                //     file.object_meta.size,
+                //     vxf.row_count(),
+                //     scan_builder,
+                // );
             }
 
             let filter = filter
@@ -326,17 +327,24 @@ impl FileOpener for VortexOpener {
                 scan_builder = scan_builder.with_limit(limit);
             }
 
+            let handle = session.handle().clone();
             let stream = scan_builder
-                .with_metrics(metrics)
+                // .with_metrics(metrics)
                 .with_projection(scan_projection)
                 .with_some_filter(filter)
-                .with_ordered(has_output_ordering)
-                .map(move |chunk| {
+                // .with_ordered(has_output_ordering)
+                .into_array_stream()
+                .vortex_expect("Failed to execute Vortex scan")
+                .then(move |chunk| {
                     let mut ctx = session.create_execution_ctx();
-                    chunk.execute_record_batch(&stream_schema, &mut ctx)
+                    let stream_schema = stream_schema.clone();
+                    handle.spawn_cpu(move || {
+                        chunk
+                            .vortex_expect("failed")
+                            .execute_record_batch(&stream_schema, &mut ctx)
+                    })
                 })
-                .into_stream()
-                .map_err(|e| exec_datafusion_err!("Failed to create Vortex stream: {e}"))?
+                // .map_err(|e| exec_datafusion_err!("Failed to create Vortex stream: {e}"))?
                 .map_ok(move |rb| {
                     // We try and slice the stream into respecting datafusion's configured batch size.
                     stream::iter(
