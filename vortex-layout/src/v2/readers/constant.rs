@@ -16,6 +16,7 @@ use vortex_array::expr::root;
 use vortex_array::expr::transform::replace;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
+use vortex_error::vortex_panic;
 use vortex_scalar::Scalar;
 
 use crate::v2::reader::Reader;
@@ -23,11 +24,10 @@ use crate::v2::reader::ReaderRef;
 use crate::v2::reader::ReaderStream;
 use crate::v2::reader::ReaderStreamRef;
 
+/// A reader that produces constant values.
 pub struct ConstantReader {
     scalar: Scalar,
     row_count: u64,
-
-    // Optional expression to apply to the constant value.
     expression: Option<Expression>,
 }
 
@@ -55,18 +55,15 @@ impl Reader for ConstantReader {
     }
 
     fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef> {
-        Ok(match &self.expression {
-            None => Arc::new(Self {
-                scalar: self.scalar.clone(),
-                row_count: self.row_count,
-                expression: Some(expression.clone()),
-            }),
-            Some(existing) => Arc::new(Self {
-                scalar: self.scalar.clone(),
-                row_count: self.row_count,
-                expression: Some(replace(existing.clone(), &root(), expression.clone())),
-            }),
-        })
+        let new_expr = match &self.expression {
+            None => expression.clone(),
+            Some(existing) => replace(existing.clone(), &root(), expression.clone()),
+        };
+        Ok(Arc::new(Self {
+            scalar: self.scalar.clone(),
+            row_count: self.row_count,
+            expression: Some(new_expr),
+        }))
     }
 
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
@@ -98,14 +95,25 @@ impl ReaderStream for ConstantReaderStream {
         }
     }
 
+    fn skip(&mut self, n: usize) {
+        let n = n as u64;
+        if n > self.remaining {
+            vortex_panic!("Cannot skip {} rows, only {} remaining", n, self.remaining);
+        }
+        self.remaining -= n;
+    }
+
     fn next_chunk(
         &mut self,
         mask: MaskFuture,
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
+        let scalar = self.scalar.clone();
         let expression = self.expression.clone();
+        self.remaining = self.remaining.saturating_sub(mask.len() as u64);
+
         Ok(async move {
             let mask = mask.await?;
-            let mut array = ConstantArray::new(self.scalar.clone(), mask.true_count()).into_array();
+            let mut array = ConstantArray::new(scalar, mask.true_count()).into_array();
             if let Some(e) = expression {
                 array = array.apply(&e)?;
             }

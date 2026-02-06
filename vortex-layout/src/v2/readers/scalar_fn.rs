@@ -7,11 +7,14 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use futures::future::try_join_all;
+use itertools::Itertools;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
 use vortex_array::MaskFuture;
 use vortex_array::arrays::ScalarFnArray;
 use vortex_array::expr::Expression;
+use vortex_array::expr::Literal;
+use vortex_array::expr::Root;
 use vortex_array::expr::ScalarFn;
 use vortex_array::expr::VTable;
 use vortex_array::expr::VTableExt;
@@ -23,8 +26,9 @@ use crate::v2::reader::Reader;
 use crate::v2::reader::ReaderRef;
 use crate::v2::reader::ReaderStream;
 use crate::v2::reader::ReaderStreamRef;
+use crate::v2::readers::constant::ConstantReader;
 
-/// A [`Reader] for applying a scalar function to another layout.
+/// A [`Reader`] for applying a scalar function to child readers.
 pub struct ScalarFnReader {
     scalar_fn: ScalarFn,
     dtype: DType,
@@ -72,7 +76,35 @@ impl Reader for ScalarFnReader {
     }
 
     fn apply(&self, expression: &Expression) -> VortexResult<ReaderRef> {
-        todo!()
+        // Treat this ScalarFnReader as a data source. Resolve Root to a clone of self,
+        // literals to constants, and wrap everything else in a new ScalarFnReader.
+        if expression.is::<Root>() {
+            return Ok(Arc::new(Self {
+                scalar_fn: self.scalar_fn.clone(),
+                dtype: self.dtype.clone(),
+                row_count: self.row_count,
+                children: self.children.clone(),
+            }));
+        }
+
+        if let Some(scalar) = expression.as_opt::<Literal>() {
+            return Ok(Arc::new(ConstantReader::new(
+                scalar.clone(),
+                self.row_count,
+            )));
+        }
+
+        let resolved_children: Vec<ReaderRef> = expression
+            .children()
+            .iter()
+            .map(|child| self.apply(child))
+            .try_collect()?;
+
+        Ok(Arc::new(Self::try_new(
+            expression.scalar_fn().clone(),
+            resolved_children,
+            self.row_count,
+        )?))
     }
 
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
@@ -109,20 +141,26 @@ impl ReaderStream for ScalarFnArrayStream {
             .flatten()
     }
 
+    fn skip(&mut self, n: usize) {
+        for stream in &mut self.input_streams {
+            stream.skip(n);
+        }
+    }
+
     fn next_chunk(
         &mut self,
-        selection: MaskFuture,
+        mask: MaskFuture,
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>> {
         let scalar_fn = self.scalar_fn.clone();
-        let len = selection.true_count();
         let futs = self
             .input_streams
             .iter_mut()
-            .map(|s| s.next_chunk(selection))
+            .map(|s| s.next_chunk(mask.clone()))
             .collect::<VortexResult<Vec<_>>>()?;
 
         Ok(Box::pin(async move {
             let input_arrays = try_join_all(futs).await?;
+            let len = input_arrays.first().map(|a| a.len()).unwrap_or(0);
             let array = ScalarFnArray::try_new(scalar_fn, input_arrays, len)?.into_array();
             let array = array.optimize()?;
             Ok(array)
@@ -140,7 +178,7 @@ pub trait ScalarFnReaderExt: VTable {
     ) -> VortexResult<ReaderRef> {
         Ok(Arc::new(ScalarFnReader::try_new(
             self.bind(options),
-            children.into(),
+            children,
             row_count,
         )?))
     }

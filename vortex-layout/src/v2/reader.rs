@@ -65,8 +65,5 @@ pub trait ReaderStream: 'static + Send + Sync {
     fn next_chunk(
         &mut self,
         mask: MaskFuture,
-        // TODO(ngates): it would be good to pass an object here that has some lifetime, and this
-        //  object is required to construct segment futures. That way the implementation is forced
-        //  to construct segment futures in this call in order to satisfy the static result lifetime.
     ) -> VortexResult<BoxFuture<'static, VortexResult<ArrayRef>>>;
 }

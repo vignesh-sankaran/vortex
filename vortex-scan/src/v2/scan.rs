@@ -7,7 +7,9 @@ use std::task::Context;
 use std::task::Poll;
 
 use futures::Stream;
+use futures::future::BoxFuture;
 use vortex_array::ArrayRef;
+use vortex_array::MaskFuture;
 use vortex_array::expr::Expression;
 use vortex_array::expr::root;
 use vortex_array::stream::ArrayStream;
@@ -15,6 +17,7 @@ use vortex_buffer::Buffer;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
 use vortex_layout::v2::reader::ReaderRef;
+use vortex_layout::v2::reader::ReaderStreamRef;
 use vortex_session::VortexSession;
 
 use crate::Selection;
@@ -89,22 +92,36 @@ impl ScanBuilder2 {
 
         let dtype = projection.return_dtype(self.reader.dtype())?;
 
-        // So we wrap the reader for filtering.
-        let filter_reader = filter.as_ref().map(|f| self.reader.apply(&f)).transpose()?;
+        // Apply expressions to the reader tree.
+        let filter_reader = filter.as_ref().map(|f| self.reader.apply(f)).transpose()?;
         let projection_reader = self.reader.apply(&projection)?;
+
+        // Execute both readers over the row range to produce streams.
+        let filter_stream = filter_reader
+            .map(|r| r.execute(self.row_range.clone()))
+            .transpose()?;
+        let projection_stream = projection_reader.execute(self.row_range)?;
+
+        // TODO(ngates): incorporate row_selection into the mask chain.
 
         Ok(Scan {
             dtype,
-            filter_reader,
-            projection_reader,
+            filter_stream,
+            projection_stream,
+            pending: None,
+            limit: self.limit,
+            rows_produced: 0,
         })
     }
 }
 
 struct Scan {
     dtype: DType,
-    filter_reader: Option<ReaderRef>,
-    projection_reader: ReaderRef,
+    filter_stream: Option<ReaderStreamRef>,
+    projection_stream: ReaderStreamRef,
+    pending: Option<BoxFuture<'static, VortexResult<ArrayRef>>>,
+    limit: Option<u64>,
+    rows_produced: u64,
 }
 
 impl ArrayStream for Scan {
@@ -116,7 +133,81 @@ impl ArrayStream for Scan {
 impl Stream for Scan {
     type Item = VortexResult<ArrayRef>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            // Poll pending future if we have one.
+            if let Some(fut) = this.pending.as_mut() {
+                match fut.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        this.pending = None;
+                        return match result {
+                            Ok(array) => {
+                                this.rows_produced += array.len() as u64;
+                                Poll::Ready(Some(Ok(array)))
+                            }
+                            Err(e) => Poll::Ready(Some(Err(e))),
+                        };
+                    }
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+
+            // Check limit.
+            if this.limit.is_some_and(|limit| this.rows_produced >= limit) {
+                return Poll::Ready(None);
+            }
+
+            // Determine the next chunk size from the projection stream.
+            let proj_chunk_len = this.projection_stream.next_chunk_len();
+
+            // If a filter stream exists, synchronize chunk sizes.
+            let chunk_len = if let Some(filter_stream) = &this.filter_stream {
+                match (proj_chunk_len, filter_stream.next_chunk_len()) {
+                    (Some(p), Some(f)) => Some(p.min(f)),
+                    _ => None,
+                }
+            } else {
+                proj_chunk_len
+            };
+
+            let Some(mut chunk_len) = chunk_len else {
+                return Poll::Ready(None);
+            };
+
+            // Limit the chunk size to avoid exceeding the row limit.
+            if let Some(limit) = this.limit {
+                let remaining = usize::try_from(limit - this.rows_produced).unwrap_or(usize::MAX);
+                chunk_len = chunk_len.min(remaining);
+                if chunk_len == 0 {
+                    return Poll::Ready(None);
+                }
+            }
+
+            // Build the mask chain: if a filter exists, evaluate it first and convert the
+            // boolean result into a Mask for the projection stream.
+            let mask = if let Some(filter_stream) = &mut this.filter_stream {
+                let all_true = MaskFuture::new_true(chunk_len);
+                let filter_fut = match filter_stream.next_chunk(all_true) {
+                    Ok(fut) => fut,
+                    Err(e) => return Poll::Ready(Some(Err(e))),
+                };
+                MaskFuture::new(chunk_len, async move {
+                    let filter_result = filter_fut.await?;
+                    filter_result.try_to_mask_fill_null_false()
+                })
+            } else {
+                MaskFuture::new_true(chunk_len)
+            };
+
+            // Request the next projection chunk with the computed mask.
+            this.pending = Some(match this.projection_stream.next_chunk(mask) {
+                Ok(fut) => fut,
+                Err(e) => return Poll::Ready(Some(Err(e))),
+            });
+
+            // Loop back to poll the newly created future.
+        }
     }
 }
