@@ -35,11 +35,13 @@ use vortex::array::ArrayRef;
 use vortex::array::VortexSessionExecute;
 use vortex::array::arrow::ArrowArrayExecutor;
 use vortex::error::VortexError;
+use vortex::error::VortexExpect;
 use vortex::file::OpenOptionsSessionExt;
 use vortex::io::InstrumentedReadAt;
 use vortex::layout::LayoutReader;
 use vortex::metrics::VortexMetrics;
 use vortex::scan::ScanBuilder;
+use vortex::scan::v2::scan::ScanBuilder2;
 use vortex::session::VortexSession;
 use vortex_utils::aliases::dash_map::DashMap;
 use vortex_utils::aliases::dash_map::Entry;
@@ -261,7 +263,14 @@ impl FileOpener for VortexOpener {
                 }
             };
 
-            let mut scan_builder = ScanBuilder::new(session.clone(), layout_reader);
+            // let mut scan_builder = ScanBuilder::new(session.clone(), layout_reader);
+            let mut scan_builder2 = ScanBuilder2::new(
+                vxf.footer()
+                    .layout()
+                    .new_reader2(&vxf.segment_source(), &session)
+                    .vortex_expect("Failed to create footer"),
+                session.clone(),
+            );
 
             if let Some(extensions) = file.extensions
                 && let Some(vortex_plan) = extensions.downcast_ref::<VortexAccessPlan>()
