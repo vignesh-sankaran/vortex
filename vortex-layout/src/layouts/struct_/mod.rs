@@ -6,6 +6,7 @@ pub mod writer;
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use reader::StructReader;
 use vortex_array::ArrayContext;
 use vortex_array::DeserializeMetadata;
@@ -33,6 +34,9 @@ use crate::children::LayoutChildren;
 use crate::children::OwnedLayoutChildren;
 use crate::segments::SegmentId;
 use crate::segments::SegmentSource;
+use crate::segments::SegmentSourceRef;
+use crate::v2;
+use crate::v2::reader::ReaderRef;
 use crate::vtable;
 
 vtable!(Struct);
@@ -122,6 +126,30 @@ impl VTable for StructVTable {
             segment_source,
             session.session(),
         )?))
+    }
+
+    fn new_reader2(
+        layout: &Self::Layout,
+        segment_source: &SegmentSourceRef,
+        session: &VortexSession,
+    ) -> VortexResult<ReaderRef> {
+        // Create validity reader from child 0 when nullable.
+        let validity = layout
+            .dtype
+            .is_nullable()
+            .then(|| Self::child(layout, 0)?.new_reader2(segment_source, session))
+            .transpose()?;
+        let start_idx = if layout.dtype.is_nullable() { 1 } else { 0 };
+        let nchildren = Self::nchildren(layout);
+        let fields = (start_idx..nchildren)
+            .map(|i| Self::child(layout, i)?.new_reader2(segment_source, session))
+            .try_collect()?;
+        Ok(Arc::new(v2::readers::struct_::StructReader::new(
+            layout.row_count,
+            layout.dtype.clone(),
+            validity,
+            fields,
+        )))
     }
 
     fn build(

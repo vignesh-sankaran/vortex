@@ -30,6 +30,9 @@ use crate::VTable;
 use crate::children::LayoutChildren;
 use crate::segments::SegmentId;
 use crate::segments::SegmentSource;
+use crate::segments::SegmentSourceRef;
+use crate::v2;
+use crate::v2::reader::ReaderRef;
 use crate::vtable;
 
 vtable!(Dict);
@@ -99,6 +102,20 @@ impl VTable for DictVTable {
             segment_source,
             session.clone(),
         )?))
+    }
+
+    fn new_reader2(
+        layout: &Self::Layout,
+        segment_source: &SegmentSourceRef,
+        session: &VortexSession,
+    ) -> VortexResult<ReaderRef> {
+        let values = layout.values.new_reader2(segment_source, session)?;
+        let codes = layout.codes.new_reader2(segment_source, session)?;
+        Ok(Arc::new(v2::readers::dict::DictReader::new(
+            Self::dtype(layout).clone(),
+            values,
+            codes,
+        )))
     }
 
     fn build(

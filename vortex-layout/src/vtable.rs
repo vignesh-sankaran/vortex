@@ -73,7 +73,7 @@ pub trait VTable: 'static + Sized + Send + Sync + Debug {
         session: &VortexSession,
     ) -> VortexResult<ReaderRef> {
         let _ = (layout, segment_source, session);
-        vortex_bail!("new_reader2 not implemented for this layout")
+        vortex_bail!("new_reader2 not implemented for layout: {:?}", layout)
     }
 
     /// Construct a new [`Layout`] from the provided parts.

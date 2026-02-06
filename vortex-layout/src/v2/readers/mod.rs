@@ -3,6 +3,7 @@
 
 pub mod chunked;
 pub mod constant;
+pub mod dict;
 pub mod flat;
 pub mod scalar_fn;
 pub mod struct_;

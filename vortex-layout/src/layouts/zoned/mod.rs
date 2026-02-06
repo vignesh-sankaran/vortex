@@ -38,6 +38,9 @@ use crate::layouts::zoned::reader::ZonedReader;
 use crate::layouts::zoned::zone_map::ZoneMap;
 use crate::segments::SegmentId;
 use crate::segments::SegmentSource;
+use crate::segments::SegmentSourceRef;
+use crate::v2;
+use crate::v2::reader::ReaderRef;
 use crate::vtable;
 
 vtable!(Zoned);
@@ -109,6 +112,21 @@ impl VTable for ZonedVTable {
             segment_source,
             session.clone(),
         )?))
+    }
+
+    fn new_reader2(
+        layout: &Self::Layout,
+        segment_source: &SegmentSourceRef,
+        session: &VortexSession,
+    ) -> VortexResult<ReaderRef> {
+        let data = layout.child(0)?.new_reader2(segment_source, session)?;
+        let zones = layout.child(1)?.new_reader2(segment_source, session)?;
+        Ok(Arc::new(v2::readers::zoned::ZonedReader::new(
+            data,
+            zones,
+            layout.zone_len,
+            layout.present_stats.clone(),
+        )))
     }
 
     fn build(

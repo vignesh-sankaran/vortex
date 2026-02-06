@@ -10,6 +10,7 @@ use std::sync::Arc;
 use vortex_array::ArrayContext;
 use vortex_array::DeserializeMetadata;
 use vortex_array::ProstMetadata;
+use vortex_array::session::ArraySessionExt;
 use vortex_buffer::ByteBuffer;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
@@ -27,6 +28,9 @@ use crate::children::LayoutChildren;
 use crate::layouts::flat::reader::FlatReader;
 use crate::segments::SegmentId;
 use crate::segments::SegmentSource;
+use crate::segments::SegmentSourceRef;
+use crate::v2;
+use crate::v2::reader::ReaderRef;
 use crate::vtable;
 
 /// Check if inline array node is enabled.
@@ -91,6 +95,23 @@ impl VTable for FlatVTable {
             name,
             segment_source,
             session.clone(),
+        )))
+    }
+
+    fn new_reader2(
+        layout: &Self::Layout,
+        segment_source: &SegmentSourceRef,
+        session: &VortexSession,
+    ) -> VortexResult<ReaderRef> {
+        let len = usize::try_from(layout.row_count).unwrap_or(usize::MAX);
+        Ok(Arc::new(v2::readers::flat::FlatReader::new(
+            len,
+            layout.dtype.clone(),
+            layout.array_tree.clone(),
+            layout.segment_id,
+            segment_source.clone(),
+            layout.ctx.clone(),
+            session.arrays().registry().clone(),
         )))
     }
 

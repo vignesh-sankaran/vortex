@@ -6,6 +6,7 @@ pub mod writer;
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use vortex_array::ArrayContext;
 use vortex_array::DeserializeMetadata;
 use vortex_array::EmptyMetadata;
@@ -24,6 +25,9 @@ use crate::children::OwnedLayoutChildren;
 use crate::layouts::chunked::reader::ChunkedReader;
 use crate::segments::SegmentId;
 use crate::segments::SegmentSource;
+use crate::segments::SegmentSourceRef;
+use crate::v2;
+use crate::v2::reader::ReaderRef;
 use crate::vtable;
 
 vtable!(Chunked);
@@ -80,6 +84,21 @@ impl VTable for ChunkedVTable {
             name,
             segment_source,
             session,
+        )))
+    }
+
+    fn new_reader2(
+        layout: &Self::Layout,
+        segment_source: &SegmentSourceRef,
+        session: &VortexSession,
+    ) -> VortexResult<ReaderRef> {
+        let chunks = (0..Self::nchildren(layout))
+            .map(|i| Self::child(layout, i)?.new_reader2(segment_source, session))
+            .try_collect()?;
+        Ok(Arc::new(v2::readers::chunked::ChunkedReader::new(
+            layout.row_count,
+            layout.dtype.clone(),
+            chunks,
         )))
     }
 

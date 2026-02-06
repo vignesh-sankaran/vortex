@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::ops::BitAnd;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::Context;
@@ -97,12 +98,11 @@ impl ScanBuilder2 {
         let projection_reader = self.reader.apply(&projection)?;
 
         // Execute both readers over the row range to produce streams.
+        let row_offset = self.row_range.start;
         let filter_stream = filter_reader
             .map(|r| r.execute(self.row_range.clone()))
             .transpose()?;
         let projection_stream = projection_reader.execute(self.row_range)?;
-
-        // TODO(ngates): incorporate row_selection into the mask chain.
 
         Ok(Scan {
             dtype,
@@ -111,6 +111,8 @@ impl ScanBuilder2 {
             pending: None,
             limit: self.limit,
             rows_produced: 0,
+            row_selection: self.row_selection,
+            row_offset,
         })
     }
 }
@@ -122,6 +124,8 @@ struct Scan {
     pending: Option<BoxFuture<'static, VortexResult<ArrayRef>>>,
     limit: Option<u64>,
     rows_produced: u64,
+    row_selection: Selection,
+    row_offset: u64,
 }
 
 impl ArrayStream for Scan {
@@ -185,8 +189,21 @@ impl Stream for Scan {
                 }
             }
 
-            // Build the mask chain: if a filter exists, evaluate it first and convert the
-            // boolean result into a Mask for the projection stream.
+            // Compute the selection mask for this chunk's row range.
+            let chunk_row_range = this.row_offset..this.row_offset + chunk_len as u64;
+            let selection_mask = this.row_selection.row_mask(&chunk_row_range).mask().clone();
+
+            // If all rows are excluded by selection, skip this chunk entirely.
+            if selection_mask.all_false() {
+                if let Some(filter_stream) = &mut this.filter_stream {
+                    filter_stream.skip(chunk_len);
+                }
+                this.projection_stream.skip(chunk_len);
+                this.row_offset += chunk_len as u64;
+                continue;
+            }
+
+            // Build the mask chain: evaluate filter (if present), then AND with selection.
             let mask = if let Some(filter_stream) = &mut this.filter_stream {
                 let all_true = MaskFuture::new_true(chunk_len);
                 let filter_fut = match filter_stream.next_chunk(all_true) {
@@ -195,11 +212,20 @@ impl Stream for Scan {
                 };
                 MaskFuture::new(chunk_len, async move {
                     let filter_result = filter_fut.await?;
-                    filter_result.try_to_mask_fill_null_false()
+                    let filter_mask = filter_result.try_to_mask_fill_null_false()?;
+                    if selection_mask.all_true() {
+                        Ok(filter_mask)
+                    } else {
+                        Ok((&filter_mask).bitand(&selection_mask))
+                    }
                 })
-            } else {
+            } else if selection_mask.all_true() {
                 MaskFuture::new_true(chunk_len)
+            } else {
+                MaskFuture::ready(selection_mask)
             };
+
+            this.row_offset += chunk_len as u64;
 
             // Request the next projection chunk with the computed mask.
             this.pending = Some(match this.projection_stream.next_chunk(mask) {

@@ -33,14 +33,21 @@ use crate::v2::readers::scalar_fn::ScalarFnReader;
 pub struct StructReader {
     row_count: u64,
     dtype: DType,
+    validity: Option<ReaderRef>,
     fields: Vec<ReaderRef>,
 }
 
 impl StructReader {
-    pub fn new(row_count: u64, dtype: DType, fields: Vec<ReaderRef>) -> Self {
+    pub fn new(
+        row_count: u64,
+        dtype: DType,
+        validity: Option<ReaderRef>,
+        fields: Vec<ReaderRef>,
+    ) -> Self {
         Self {
             row_count,
             dtype,
+            validity,
             fields,
         }
     }
@@ -52,6 +59,7 @@ impl StructReader {
             return Ok(Arc::new(Self {
                 row_count: self.row_count,
                 dtype: self.dtype.clone(),
+                validity: self.validity.clone(),
                 fields: self.fields.clone(),
             }));
         }
@@ -116,6 +124,11 @@ impl Reader for StructReader {
     }
 
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef> {
+        let validity_stream = self
+            .validity
+            .as_ref()
+            .map(|v| v.execute(row_range.clone()))
+            .transpose()?;
         let field_streams = self
             .fields
             .iter()
@@ -124,6 +137,7 @@ impl Reader for StructReader {
 
         Ok(Box::new(StructReaderStream {
             dtype: self.dtype.clone(),
+            validity: validity_stream,
             fields: field_streams,
         }))
     }
@@ -131,6 +145,7 @@ impl Reader for StructReader {
 
 struct StructReaderStream {
     dtype: DType,
+    validity: Option<ReaderStreamRef>,
     fields: Vec<ReaderStreamRef>,
 }
 
@@ -140,14 +155,23 @@ impl ReaderStream for StructReaderStream {
     }
 
     fn next_chunk_len(&self) -> Option<usize> {
-        self.fields
+        let field_min = self
+            .fields
             .iter()
             .map(|s| s.next_chunk_len())
             .min()
-            .flatten()
+            .flatten();
+        match (&self.validity, field_min) {
+            (Some(v), Some(f)) => v.next_chunk_len().map(|vl| vl.min(f)),
+            (Some(v), None) => v.next_chunk_len(),
+            (None, f) => f,
+        }
     }
 
     fn skip(&mut self, n: usize) {
+        if let Some(validity) = &mut self.validity {
+            validity.skip(n);
+        }
         for field in &mut self.fields {
             field.skip(n);
         }
@@ -162,7 +186,12 @@ impl ReaderStream for StructReaderStream {
             .as_struct_fields_opt()
             .ok_or_else(|| vortex_error::vortex_err!("Expected struct dtype"))?
             .clone();
-        let validity: Validity = self.dtype.nullability().into();
+        let nullability = self.dtype.nullability();
+        let validity_fut = self
+            .validity
+            .as_mut()
+            .map(|v| v.next_chunk(mask.clone()))
+            .transpose()?;
         let fields = self
             .fields
             .iter_mut()
@@ -172,6 +201,12 @@ impl ReaderStream for StructReaderStream {
         Ok(async move {
             let fields = try_join_all(fields);
             let (fields, mask) = try_join!(fields, mask)?;
+            let validity = if let Some(validity_fut) = validity_fut {
+                let validity_array = validity_fut.await?;
+                Validity::Array(validity_array)
+            } else {
+                nullability.into()
+            };
             Ok(
                 StructArray::try_new_with_dtype(
                     fields,
