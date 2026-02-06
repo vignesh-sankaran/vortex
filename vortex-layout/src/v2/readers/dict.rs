@@ -8,6 +8,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::Shared;
+use termtree::Tree;
 use vortex_array::ArrayFuture;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
@@ -102,6 +103,28 @@ impl Reader for DictReader {
             values_fut,
             expression: self.expression.clone(),
         }))
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        let mut label = format!("Dict({}, rows={}", self.dtype, self.codes.row_count());
+        if let Some(expr) = &self.expression {
+            label.push_str(&format!(", expr={}", expr));
+        }
+        label.push(')');
+
+        let mut tree = Tree::new(label);
+
+        let values_child = self.values.display_tree();
+        tree.push(
+            Tree::new(format!("values: {}", values_child.root)).with_leaves(values_child.leaves),
+        );
+
+        let codes_child = self.codes.display_tree();
+        tree.push(
+            Tree::new(format!("codes: {}", codes_child.root)).with_leaves(codes_child.leaves),
+        );
+
+        tree
     }
 }
 

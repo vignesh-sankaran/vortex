@@ -5,6 +5,7 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
+use termtree::Tree;
 use vortex_array::ArrayFuture;
 use vortex_array::IntoArray;
 use vortex_array::arrays::ConstantArray;
@@ -70,6 +71,15 @@ impl Reader for ConstantReader {
             remaining,
             expression: self.expression.clone(),
         }))
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        Tree::new(format!(
+            "Constant({}, rows={}, value={})",
+            self.scalar.dtype(),
+            self.row_count,
+            self.scalar
+        ))
     }
 }
 

@@ -5,6 +5,7 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
+use termtree::Tree;
 use vortex_array::expr::Expression;
 use vortex_array::expr::stats::Stat;
 use vortex_dtype::DType;
@@ -74,5 +75,26 @@ impl Reader for ZonedReader {
         // TODO(ngates): use zone map to produce a pruning mask, then drive the data stream
         //  with zones that can't match the filter skipped.
         self.data.execute(row_range)
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        let label = format!(
+            "Zoned({}, rows={}, zone_len={})",
+            self.data.dtype(),
+            self.data.row_count(),
+            self.zone_len
+        );
+        let mut tree = Tree::new(label);
+
+        let data_child = self.data.display_tree();
+        tree.push(Tree::new(format!("data: {}", data_child.root)).with_leaves(data_child.leaves));
+
+        let zone_map_child = self.zone_map.display_tree();
+        tree.push(
+            Tree::new(format!("zone_map: {}", zone_map_child.root))
+                .with_leaves(zone_map_child.leaves),
+        );
+
+        tree
     }
 }

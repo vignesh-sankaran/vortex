@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
+use termtree::Tree;
 use vortex_array::ArrayFuture;
 use vortex_array::IntoArray;
 use vortex_array::arrays::ScalarFnArray;
@@ -119,6 +120,21 @@ impl Reader for ScalarFnReader {
             input_streams,
             input_buffers: vec![None; num_inputs],
         }))
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        let label = format!(
+            "ScalarFn({}, rows={}, fn={})",
+            self.dtype, self.row_count, self.scalar_fn
+        );
+        let mut tree = Tree::new(label);
+        for (i, child) in self.children.iter().enumerate() {
+            let child_tree = child.display_tree();
+            tree.push(
+                Tree::new(format!("[{}]: {}", i, child_tree.root)).with_leaves(child_tree.leaves),
+            );
+        }
+        tree
     }
 }
 

@@ -11005,7 +11005,6 @@ dependencies = [
  "vortex-buffer",
  "vortex-dtype",
  "vortex-error",
- "vortex-mask",
  "vortex-proto",
  "vortex-session",
  "vortex-utils",

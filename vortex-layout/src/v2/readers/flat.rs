@@ -8,6 +8,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::Shared;
+use termtree::Tree;
 use vortex_array::ArrayContext;
 use vortex_array::ArrayFuture;
 use vortex_array::ArrayRef;
@@ -149,6 +150,18 @@ impl Reader for FlatReader {
             offset: start,
             remaining: end - start,
         }))
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        let mut label = format!(
+            "Flat({}, rows={}, segment={}",
+            self.dtype, self.len, self.segment_id
+        );
+        if let Some(expr) = &self.expression {
+            label.push_str(&format!(", expr={}", expr));
+        }
+        label.push(')');
+        Tree::new(label)
     }
 }
 

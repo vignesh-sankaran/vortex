@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
+use termtree::Tree;
 use vortex_array::ArrayFuture;
 use vortex_array::IntoArray;
 use vortex_array::arrays::StructArray;
@@ -139,6 +140,32 @@ impl Reader for StructReader {
             validity_buffer: None,
             field_buffers: vec![None; num_fields],
         }))
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        let label = format!("Struct({}, rows={})", self.dtype, self.row_count);
+        let mut tree = Tree::new(label);
+
+        // Add field children with names from the struct dtype.
+        if let Some(struct_fields) = self.dtype.as_struct_fields_opt() {
+            for (name, field_reader) in struct_fields.names().iter().zip(self.fields.iter()) {
+                let child = field_reader.display_tree();
+                tree.push(Tree::new(format!("{}: {}", name, child.root)).with_leaves(child.leaves));
+            }
+        } else {
+            for (i, field_reader) in self.fields.iter().enumerate() {
+                let child = field_reader.display_tree();
+                tree.push(Tree::new(format!("[{}]: {}", i, child.root)).with_leaves(child.leaves));
+            }
+        }
+
+        // Add validity child if present.
+        if let Some(validity) = &self.validity {
+            let child = validity.display_tree();
+            tree.push(Tree::new(format!("validity: {}", child.root)).with_leaves(child.leaves));
+        }
+
+        tree
     }
 }
 

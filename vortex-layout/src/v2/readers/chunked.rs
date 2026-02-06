@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
+use termtree::Tree;
 use vortex_array::ArrayFuture;
 use vortex_array::expr::Expression;
 use vortex_dtype::DType;
@@ -97,6 +98,21 @@ impl Reader for ChunkedReader {
             pending_chunks,
             active_stream: None,
         }))
+    }
+
+    fn display_tree(&self) -> Tree<String> {
+        let label = format!(
+            "Chunked({}, rows={}, chunks={})",
+            self.dtype,
+            self.row_count,
+            self.chunks.len()
+        );
+        let mut tree = Tree::new(label);
+        for (i, chunk) in self.chunks.iter().enumerate() {
+            let child = chunk.display_tree();
+            tree.push(Tree::new(format!("[{}]: {}", i, child.root)).with_leaves(child.leaves));
+        }
+        tree
     }
 }
 

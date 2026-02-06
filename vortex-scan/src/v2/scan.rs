@@ -95,10 +95,19 @@ impl ScanBuilder2 {
         let dtype = projection.return_dtype(self.reader.dtype())?;
 
         // Apply expressions to the reader tree.
-        let filter_reader = filter.as_ref().map(|f| self.reader.apply(f)).transpose()?;
         let projection_reader = self.reader.apply(&projection)?;
+        let filter_reader = filter.as_ref().map(|f| self.reader.apply(f)).transpose()?;
+
+        tracing::info!(
+            "Executing scan with:\nProjection:\n{}\nFilter:\n{}",
+            projection_reader.display_tree(),
+            filter_reader
+                .as_ref()
+                .map_or("None".to_string(), |f| f.display_tree().to_string())
+        );
 
         // Execute both readers over the row range to produce streams.
+        // TODO(ngates): we could partition this?
         let row_offset = self.row_range.start;
         let filter_stream = filter_reader
             .map(|r| r.execute(self.row_range.clone()))

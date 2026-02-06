@@ -2,9 +2,12 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::any::Any;
+use std::fmt;
+use std::fmt::Display;
 use std::ops::Range;
 use std::sync::Arc;
 
+use termtree::Tree;
 use vortex_array::ArrayFuture;
 use vortex_array::expr::Expression;
 use vortex_dtype::DType;
@@ -32,6 +35,18 @@ pub trait Reader: 'static + Send + Sync {
 
     /// Creates a scan over the given row range of the reader.
     fn execute(&self, row_range: Range<u64>) -> VortexResult<ReaderStreamRef>;
+
+    /// Build a tree representation of this reader for display purposes.
+    fn display_tree(&self) -> Tree<String>;
+}
+
+/// A convenience wrapper for displaying a reader tree.
+pub struct DisplayReaderTree<'a>(pub &'a dyn Reader);
+
+impl Display for DisplayReaderTree<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.display_tree())
+    }
 }
 
 pub type ReaderStreamRef = Box<dyn ReaderStream>;
