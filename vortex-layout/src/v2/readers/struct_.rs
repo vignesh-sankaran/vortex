@@ -182,9 +182,9 @@ impl StructReaderStream {
     fn next_for_child(
         stream: &mut ReaderStreamRef,
         buffer: &mut Option<ArrayFuture>,
-    ) -> Option<VortexResult<ArrayFuture>> {
+    ) -> VortexResult<Option<ArrayFuture>> {
         if let Some(buffered) = buffer.take() {
-            return Some(Ok(buffered));
+            return Ok(Some(buffered));
         }
         stream.next_chunk()
     }
@@ -220,40 +220,37 @@ impl ReaderStream for StructReaderStream {
         }
     }
 
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
         // Collect an ArrayFuture for each child (validity + fields).
         let mut all_futures: Vec<ArrayFuture> = Vec::with_capacity(1 + self.fields.len());
 
         // Validity
         let has_validity = self.validity.is_some();
         if let Some(ref mut validity_stream) = self.validity {
-            let validity_future =
-                match Self::next_for_child(validity_stream, &mut self.validity_buffer) {
-                    Some(Ok(f)) => f,
-                    Some(Err(e)) => return Some(Err(e)),
-                    None => return None,
-                };
+            let Some(validity_future) =
+                Self::next_for_child(validity_stream, &mut self.validity_buffer)?
+            else {
+                return Ok(None);
+            };
             all_futures.push(validity_future);
         }
 
         // Fields
         for (field_stream, field_buf) in self.fields.iter_mut().zip(self.field_buffers.iter_mut()) {
-            let field_future = match Self::next_for_child(field_stream, field_buf) {
-                Some(Ok(f)) => f,
-                Some(Err(e)) => return Some(Err(e)),
-                None => return None,
+            let Some(field_future) = Self::next_for_child(field_stream, field_buf)? else {
+                return Ok(None);
             };
             all_futures.push(field_future);
         }
 
         if all_futures.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         // Find the minimum length.
         let min_len = all_futures.iter().map(|f| f.len()).min().unwrap_or(0);
         if min_len == 0 {
-            return None;
+            return Ok(None);
         }
 
         // For children with len > min_len, buffer the remainder and slice.
@@ -278,17 +275,14 @@ impl ReaderStream for StructReaderStream {
             }
         }
 
-        let struct_fields = match self
+        let struct_fields = self
             .dtype
             .as_struct_fields_opt()
-            .ok_or_else(|| vortex_error::vortex_err!("Expected struct dtype"))
-        {
-            Ok(f) => f.clone(),
-            Err(e) => return Some(Err(e)),
-        };
+            .ok_or_else(|| vortex_error::vortex_err!("Expected struct dtype"))?
+            .clone();
         let nullability = self.dtype.nullability();
 
-        Some(Ok(ArrayFuture::new(min_len, async move {
+        Ok(Some(ArrayFuture::new(min_len, async move {
             // Split off validity future from field futures.
             let arrays = try_join_all(chunk_futures).await?;
 

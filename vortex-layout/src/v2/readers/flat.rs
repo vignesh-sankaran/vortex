@@ -187,9 +187,9 @@ impl ReaderStream for FlatReaderStream {
         self.remaining -= n;
     }
 
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
         if self.remaining == 0 {
-            return None;
+            return Ok(None);
         }
 
         let array_fut = self.array_fut.clone();
@@ -201,7 +201,7 @@ impl ReaderStream for FlatReaderStream {
         self.offset += len;
         self.remaining = 0;
 
-        Some(Ok(ArrayFuture::new(len, async move {
+        Ok(Some(ArrayFuture::new(len, async move {
             // Await the shared array future (decoded once, shared across chunks).
             let mut array: ArrayRef = array_fut.await?;
 

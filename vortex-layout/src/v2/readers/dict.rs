@@ -85,8 +85,8 @@ impl Reader for DictReader {
         let values_row_count = self.values.row_count();
         let mut values_stream = self.values.execute(0..values_row_count)?;
         let values_array_future = values_stream
-            .next_chunk()
-            .ok_or_else(|| vortex_err!("Dict values stream is empty"))??;
+            .next_chunk()?
+            .ok_or_else(|| vortex_err!("Dict values stream is empty"))?;
         let values_fut: Shared<BoxFuture<'static, SharedVortexResult<ArrayRef>>> = async move {
             let array = values_array_future.await?;
             Ok(SharedArray::new(array).into_array())
@@ -144,16 +144,15 @@ impl ReaderStream for DictReaderStream {
         self.codes_stream.skip(n);
     }
 
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
-        let codes_future = match self.codes_stream.next_chunk()? {
-            Ok(f) => f,
-            Err(e) => return Some(Err(e)),
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
+        let Some(codes_future) = self.codes_stream.next_chunk()? else {
+            return Ok(None);
         };
         let values_fut = self.values_fut.clone();
         let expression = self.expression.clone();
         let len = codes_future.len();
 
-        Some(Ok(ArrayFuture::new(len, async move {
+        Ok(Some(ArrayFuture::new(len, async move {
             let values = values_fut.await.map_err(|e| vortex_err!("{e}"))?;
             let codes = codes_future.await?;
             let mut array = DictArray::try_new(codes, values)?.into_array();

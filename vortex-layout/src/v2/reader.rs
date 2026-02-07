@@ -67,5 +67,5 @@ pub trait ReaderStream: 'static + Send + Sync {
     fn skip(&mut self, n: usize);
 
     /// Returns the next chunk of data as an [`ArrayFuture`], or `None` if no more chunks.
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>>;
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>>;
 }

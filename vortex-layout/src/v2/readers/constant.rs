@@ -102,9 +102,9 @@ impl ReaderStream for ConstantReaderStream {
         self.remaining -= n;
     }
 
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
         if self.remaining == 0 {
-            return None;
+            return Ok(None);
         }
 
         let len = usize::try_from(self.remaining).unwrap_or(usize::MAX);
@@ -112,7 +112,7 @@ impl ReaderStream for ConstantReaderStream {
         let expression = self.expression.clone();
         self.remaining = 0;
 
-        Some(Ok(ArrayFuture::new(len, async move {
+        Ok(Some(ArrayFuture::new(len, async move {
             let mut array = ConstantArray::new(scalar, len).into_array();
             if let Some(e) = expression {
                 array = array.apply(&e)?;

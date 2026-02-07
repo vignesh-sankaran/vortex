@@ -189,18 +189,18 @@ impl ReaderStream for ChunkedReaderStream {
         }
     }
 
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
         loop {
-            match self.ensure_active_stream() {
-                Ok(true) => {}
-                Ok(false) => return None,
-                Err(e) => return Some(Err(e)),
+            if !self.ensure_active_stream()? {
+                return Ok(None);
             }
 
-            let stream = self.active_stream.as_mut()?;
+            let Some(stream) = self.active_stream.as_mut() else {
+                return Ok(None);
+            };
 
-            match stream.next_chunk() {
-                Some(result) => return Some(result),
+            match stream.next_chunk()? {
+                Some(future) => return Ok(Some(future)),
                 None => {
                     // Current stream is exhausted, try next chunk.
                     self.active_stream = None;

@@ -144,9 +144,9 @@ struct Scan {
 
 impl Scan {
     /// Get the next projection chunk, consuming from the buffer first.
-    fn next_projection_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+    fn next_projection_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
         if let Some(buffered) = self.projection_buffer.take() {
-            return Some(Ok(buffered));
+            return Ok(Some(buffered));
         }
         self.projection_stream.next_chunk()
     }
@@ -155,9 +155,9 @@ impl Scan {
     fn next_filter_chunk(
         stream: &mut ReaderStreamRef,
         buffer: &mut Option<ArrayFuture>,
-    ) -> Option<VortexResult<ArrayFuture>> {
+    ) -> VortexResult<Option<ArrayFuture>> {
         if let Some(buffered) = buffer.take() {
-            return Some(Ok(buffered));
+            return Ok(Some(buffered));
         }
         stream.next_chunk()
     }
@@ -171,14 +171,14 @@ impl Scan {
 
         while remaining > 0 {
             let chunk = match Self::next_filter_chunk(filter_stream, &mut self.filter_buffer) {
-                Some(Ok(f)) => f,
-                Some(Err(e)) => return Some(Err(e)),
-                None => {
+                Ok(Some(f)) => f,
+                Ok(None) => {
                     return Some(Err(vortex_error::vortex_err!(
                         "Filter stream exhausted before covering {} rows",
                         n
                     )));
                 }
+                Err(e) => return Some(Err(e)),
             };
 
             if chunk.len() <= remaining {
@@ -251,9 +251,9 @@ impl Stream for Scan {
 
             // Get the next projection chunk.
             let proj_future = match this.next_projection_chunk() {
-                Some(Ok(f)) => f,
-                Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-                None => return Poll::Ready(None),
+                Ok(Some(f)) => f,
+                Ok(None) => return Poll::Ready(None),
+                Err(e) => return Poll::Ready(Some(Err(e))),
             };
 
             let mut chunk_len = proj_future.len();

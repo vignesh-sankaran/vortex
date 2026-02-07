@@ -150,9 +150,9 @@ impl ScalarFnArrayStream {
     fn next_for_input(
         stream: &mut ReaderStreamRef,
         buffer: &mut Option<ArrayFuture>,
-    ) -> Option<VortexResult<ArrayFuture>> {
+    ) -> VortexResult<Option<ArrayFuture>> {
         if let Some(buffered) = buffer.take() {
-            return Some(Ok(buffered));
+            return Ok(Some(buffered));
         }
         stream.next_chunk()
     }
@@ -183,7 +183,7 @@ impl ReaderStream for ScalarFnArrayStream {
         }
     }
 
-    fn next_chunk(&mut self) -> Option<VortexResult<ArrayFuture>> {
+    fn next_chunk(&mut self) -> VortexResult<Option<ArrayFuture>> {
         // Collect an ArrayFuture for each input.
         let mut all_futures: Vec<ArrayFuture> = Vec::with_capacity(self.input_streams.len());
 
@@ -192,22 +192,20 @@ impl ReaderStream for ScalarFnArrayStream {
             .iter_mut()
             .zip(self.input_buffers.iter_mut())
         {
-            let future = match Self::next_for_input(stream, buffer) {
-                Some(Ok(f)) => f,
-                Some(Err(e)) => return Some(Err(e)),
-                None => return None,
+            let Some(future) = Self::next_for_input(stream, buffer)? else {
+                return Ok(None);
             };
             all_futures.push(future);
         }
 
         if all_futures.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         // Find the minimum length.
         let min_len = all_futures.iter().map(|f| f.len()).min().unwrap_or(0);
         if min_len == 0 {
-            return None;
+            return Ok(None);
         }
 
         // For inputs with len > min_len, buffer the remainder and slice.
@@ -224,7 +222,7 @@ impl ReaderStream for ScalarFnArrayStream {
         }
 
         let scalar_fn = self.scalar_fn.clone();
-        Some(Ok(ArrayFuture::new(min_len, async move {
+        Ok(Some(ArrayFuture::new(min_len, async move {
             let input_arrays = try_join_all(chunk_futures).await?;
             let array = ScalarFnArray::try_new(scalar_fn, input_arrays, min_len)?.into_array();
             let array = array.optimize()?;
