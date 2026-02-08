@@ -281,23 +281,28 @@ impl ReaderStream for StructReaderStream {
             .ok_or_else(|| vortex_error::vortex_err!("Expected struct dtype"))?
             .clone();
         let nullability = self.dtype.nullability();
+        let estimated_bytes: usize = chunk_futures.iter().map(|f| f.estimated_bytes()).sum();
 
-        Ok(Some(ArrayFuture::new(min_len, async move {
-            // Split off validity future from field futures.
-            let arrays = try_join_all(chunk_futures).await?;
+        Ok(Some(ArrayFuture::new(
+            min_len,
+            estimated_bytes,
+            async move {
+                // Split off validity future from field futures.
+                let arrays = try_join_all(chunk_futures).await?;
 
-            let (validity, fields) = if has_validity {
-                let validity_array = arrays[0].clone();
-                let fields = arrays[1..].to_vec();
-                (Validity::Array(validity_array), fields)
-            } else {
-                (nullability.into(), arrays)
-            };
+                let (validity, fields) = if has_validity {
+                    let validity_array = arrays[0].clone();
+                    let fields = arrays[1..].to_vec();
+                    (Validity::Array(validity_array), fields)
+                } else {
+                    (nullability.into(), arrays)
+                };
 
-            Ok(
-                StructArray::try_new_with_dtype(fields, struct_fields, min_len, validity)?
-                    .into_array(),
-            )
-        })))
+                Ok(
+                    StructArray::try_new_with_dtype(fields, struct_fields, min_len, validity)?
+                        .into_array(),
+                )
+            },
+        )))
     }
 }

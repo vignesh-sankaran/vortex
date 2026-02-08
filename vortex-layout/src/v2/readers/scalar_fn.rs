@@ -222,12 +222,17 @@ impl ReaderStream for ScalarFnArrayStream {
         }
 
         let scalar_fn = self.scalar_fn.clone();
-        Ok(Some(ArrayFuture::new(min_len, async move {
-            let input_arrays = try_join_all(chunk_futures).await?;
-            let array = ScalarFnArray::try_new(scalar_fn, input_arrays, min_len)?.into_array();
-            let array = array.optimize()?;
-            Ok(array)
-        })))
+        let estimated_bytes: usize = chunk_futures.iter().map(|f| f.estimated_bytes()).sum();
+        Ok(Some(ArrayFuture::new(
+            min_len,
+            estimated_bytes,
+            async move {
+                let input_arrays = try_join_all(chunk_futures).await?;
+                let array = ScalarFnArray::try_new(scalar_fn, input_arrays, min_len)?.into_array();
+                let array = array.optimize()?;
+                Ok(array)
+            },
+        )))
     }
 }
 

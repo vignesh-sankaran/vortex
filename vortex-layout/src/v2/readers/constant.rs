@@ -70,6 +70,7 @@ impl Reader for ConstantReader {
             scalar: self.scalar.clone(),
             remaining,
             expression: self.expression.clone(),
+            estimated_bytes_per_row: super::estimated_decoded_bytes(self.scalar.dtype(), 1),
         }))
     }
 
@@ -87,6 +88,7 @@ struct ConstantReaderStream {
     scalar: Scalar,
     remaining: u64,
     expression: Option<Expression>,
+    estimated_bytes_per_row: usize,
 }
 
 impl ReaderStream for ConstantReaderStream {
@@ -110,9 +112,10 @@ impl ReaderStream for ConstantReaderStream {
         let len = usize::try_from(self.remaining).unwrap_or(usize::MAX);
         let scalar = self.scalar.clone();
         let expression = self.expression.clone();
+        let estimated_bytes = len * self.estimated_bytes_per_row;
         self.remaining = 0;
 
-        Ok(Some(ArrayFuture::new(len, async move {
+        Ok(Some(ArrayFuture::new(len, estimated_bytes, async move {
             let mut array = ConstantArray::new(scalar, len).into_array();
             if let Some(e) = expression {
                 array = array.apply(&e)?;

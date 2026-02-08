@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::collections::VecDeque;
 use std::ops::BitAnd;
 use std::ops::Range;
 use std::pin::Pin;
@@ -8,7 +9,9 @@ use std::task::Context;
 use std::task::Poll;
 
 use futures::Stream;
+use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::stream::FuturesOrdered;
 use vortex_array::ArrayFuture;
 use vortex_array::ArrayRef;
 use vortex_array::expr::Expression;
@@ -32,6 +35,7 @@ pub struct ScanBuilder2 {
     row_range: Range<u64>,
     row_selection: Selection, // NOTE: applies to the selected row range.
     session: VortexSession,
+    byte_budget: usize,
 }
 
 impl ScanBuilder2 {
@@ -45,6 +49,7 @@ impl ScanBuilder2 {
             row_range,
             row_selection: Selection::All,
             session,
+            byte_budget: 0,
         }
     }
 
@@ -85,6 +90,14 @@ impl ScanBuilder2 {
         self
     }
 
+    /// Sets the byte budget for pipelining. When set to a non-zero value, the scan will
+    /// enqueue multiple chunks of work up to the given estimated byte budget, allowing I/O
+    /// and compute to overlap.
+    pub fn with_byte_budget(mut self, byte_budget: usize) -> Self {
+        self.byte_budget = byte_budget;
+        self
+    }
+
     pub fn into_array_stream(self) -> VortexResult<impl ArrayStream> {
         let projection = self.projection.optimize_recursive(self.reader.dtype())?;
         let filter = self
@@ -98,7 +111,7 @@ impl ScanBuilder2 {
         let projection_reader = self.reader.apply(&projection)?;
         let filter_reader = filter.as_ref().map(|f| self.reader.apply(f)).transpose()?;
 
-        tracing::info!(
+        tracing::debug!(
             "Executing scan with:\nProjection:\n{}\nFilter:\n{}",
             projection_reader.display_tree(),
             filter_reader
@@ -118,13 +131,18 @@ impl ScanBuilder2 {
             dtype,
             filter_stream,
             projection_stream,
-            pending: None,
+            pipeline: FuturesOrdered::new(),
+            pipeline_bytes: VecDeque::new(),
+            bytes_in_flight: 0,
+            byte_budget: self.byte_budget,
             limit: self.limit,
             rows_produced: 0,
+            rows_enqueued: 0,
             row_selection: self.row_selection,
             row_offset,
             filter_buffer: None,
             projection_buffer: None,
+            exhausted: false,
         })
     }
 }
@@ -133,13 +151,18 @@ struct Scan {
     dtype: DType,
     filter_stream: Option<ReaderStreamRef>,
     projection_stream: ReaderStreamRef,
-    pending: Option<BoxFuture<'static, VortexResult<ArrayRef>>>,
+    pipeline: FuturesOrdered<BoxFuture<'static, VortexResult<ArrayRef>>>,
+    pipeline_bytes: VecDeque<usize>,
+    bytes_in_flight: usize,
+    byte_budget: usize,
     limit: Option<u64>,
     rows_produced: u64,
+    rows_enqueued: u64,
     row_selection: Selection,
     row_offset: u64,
     filter_buffer: Option<ArrayFuture>,
     projection_buffer: Option<ArrayFuture>,
+    exhausted: bool,
 }
 
 impl Scan {
@@ -226,33 +249,24 @@ impl Stream for Scan {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        loop {
-            // Poll pending future if we have one.
-            if let Some(fut) = this.pending.as_mut() {
-                match fut.as_mut().poll(cx) {
-                    Poll::Ready(result) => {
-                        this.pending = None;
-                        return match result {
-                            Ok(array) => {
-                                this.rows_produced += array.len() as u64;
-                                Poll::Ready(Some(Ok(array)))
-                            }
-                            Err(e) => Poll::Ready(Some(Err(e))),
-                        };
-                    }
-                    Poll::Pending => return Poll::Pending,
-                }
-            }
-
-            // Check limit.
-            if this.limit.is_some_and(|limit| this.rows_produced >= limit) {
-                return Poll::Ready(None);
+        // === Fill phase ===
+        // Enqueue chunks into the pipeline until we hit the byte budget or exhaust input.
+        while !this.exhausted
+            && (this.bytes_in_flight == 0 || this.bytes_in_flight < this.byte_budget)
+        {
+            // Check limit on rows enqueued.
+            if this.limit.is_some_and(|limit| this.rows_enqueued >= limit) {
+                this.exhausted = true;
+                break;
             }
 
             // Get the next projection chunk.
             let proj_future = match this.next_projection_chunk() {
                 Ok(Some(f)) => f,
-                Ok(None) => return Poll::Ready(None),
+                Ok(None) => {
+                    this.exhausted = true;
+                    break;
+                }
                 Err(e) => return Poll::Ready(Some(Err(e))),
             };
 
@@ -260,7 +274,7 @@ impl Stream for Scan {
 
             // Apply limit: if remaining < chunk_len, slice the projection future.
             if let Some(limit) = this.limit {
-                let remaining = usize::try_from(limit - this.rows_produced).unwrap_or(usize::MAX);
+                let remaining = usize::try_from(limit - this.rows_enqueued).unwrap_or(usize::MAX);
                 if remaining < chunk_len {
                     // Buffer the remainder and use only what we need.
                     this.projection_buffer = Some(proj_future.slice(remaining..chunk_len));
@@ -275,7 +289,8 @@ impl Stream for Scan {
             };
 
             if chunk_len == 0 {
-                return Poll::Ready(None);
+                this.exhausted = true;
+                break;
             }
 
             // Compute the selection mask for this chunk's row range.
@@ -291,8 +306,12 @@ impl Stream for Scan {
 
             this.row_offset += chunk_len as u64;
 
-            // Build the pending future: await projection, apply filter + selection.
-            if this.filter_stream.is_some() {
+            // Estimate bytes for this chunk.
+            let proj_estimated = proj_future.estimated_bytes();
+            let mut chunk_estimated = proj_estimated;
+
+            // Build the future: await projection, apply filter + selection.
+            let fut: BoxFuture<'static, VortexResult<ArrayRef>> = if this.filter_stream.is_some() {
                 let filter_chunks = match this.collect_filter_chunks(chunk_len) {
                     Some(Ok(chunks)) => chunks,
                     Some(Err(e)) => return Poll::Ready(Some(Err(e))),
@@ -303,7 +322,12 @@ impl Stream for Scan {
                     }
                 };
 
-                this.pending = Some(Box::pin(async move {
+                chunk_estimated += filter_chunks
+                    .iter()
+                    .map(|f| f.estimated_bytes())
+                    .sum::<usize>();
+
+                Box::pin(async move {
                     // Await filter chunks and combine into a single mask.
                     let mut filter_masks: Vec<Mask> = Vec::with_capacity(filter_chunks.len());
                     for filter_chunk in filter_chunks {
@@ -336,19 +360,42 @@ impl Stream for Scan {
                     } else {
                         array.filter(mask)
                     }
-                }));
+                })
             } else if selection_mask.all_true() {
-                // No filter, no selection masking — just await projection.
-                this.pending = Some(Box::pin(proj_future));
+                Box::pin(proj_future)
             } else {
-                // No filter, but selection mask needs to be applied.
-                this.pending = Some(Box::pin(async move {
+                Box::pin(async move {
                     let array = proj_future.await?;
                     array.filter(selection_mask)
-                }));
-            }
+                })
+            };
 
-            // Loop back to poll the newly created future.
+            this.pipeline.push_back(fut);
+            this.pipeline_bytes.push_back(chunk_estimated);
+            this.bytes_in_flight += chunk_estimated;
+            this.rows_enqueued += chunk_len as u64;
+        }
+
+        // === Drain phase ===
+        if this.pipeline.is_empty() {
+            return Poll::Ready(None);
+        }
+
+        match this.pipeline.poll_next_unpin(cx) {
+            Poll::Ready(Some(result)) => {
+                if let Some(estimated) = this.pipeline_bytes.pop_front() {
+                    this.bytes_in_flight = this.bytes_in_flight.saturating_sub(estimated);
+                }
+                match result {
+                    Ok(array) => {
+                        this.rows_produced += array.len() as u64;
+                        Poll::Ready(Some(Ok(array)))
+                    }
+                    Err(e) => Poll::Ready(Some(Err(e))),
+                }
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
         }
     }
 }

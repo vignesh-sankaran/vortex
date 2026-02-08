@@ -10,7 +10,6 @@ use std::sync::Arc;
 use vortex_array::ArrayContext;
 use vortex_array::DeserializeMetadata;
 use vortex_array::ProstMetadata;
-use vortex_array::session::ArraySessionExt;
 use vortex_buffer::ByteBuffer;
 use vortex_dtype::DType;
 use vortex_error::VortexResult;
@@ -111,7 +110,7 @@ impl VTable for FlatVTable {
             layout.segment_id,
             segment_source.clone(),
             layout.ctx.clone(),
-            session.arrays().registry().clone(),
+            session.clone(),
         )))
     }
 

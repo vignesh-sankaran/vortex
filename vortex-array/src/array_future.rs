@@ -21,11 +21,12 @@ use crate::ArrayRef;
 pub struct ArrayFuture {
     inner: Shared<BoxFuture<'static, SharedVortexResult<ArrayRef>>>,
     len: usize,
+    estimated_bytes: usize,
 }
 
 impl ArrayFuture {
     /// Create a new `ArrayFuture` from a future that returns an array.
-    pub fn new<F>(len: usize, fut: F) -> Self
+    pub fn new<F>(len: usize, estimated_bytes: usize, fut: F) -> Self
     where
         F: Future<Output = VortexResult<ArrayRef>> + Send + 'static,
     {
@@ -41,13 +42,14 @@ impl ArrayFuture {
                 .boxed()
                 .shared(),
             len,
+            estimated_bytes,
         }
     }
 
     /// Create an `ArrayFuture` from an already-resolved array.
     pub fn ready(array: ArrayRef) -> Self {
         let len = array.len();
-        Self::new(len, async move { Ok(array) })
+        Self::new(len, 0, async move { Ok(array) })
     }
 
     /// Returns the length of the array.
@@ -60,11 +62,22 @@ impl ArrayFuture {
         self.len == 0
     }
 
+    /// Returns the estimated decoded byte size of the array.
+    pub fn estimated_bytes(&self) -> usize {
+        self.estimated_bytes
+    }
+
     /// Create an `ArrayFuture` that resolves to a slice of the original array.
     pub fn slice(&self, range: Range<usize>) -> Self {
         let inner = self.inner.clone();
         let parent_len = self.len;
-        Self::new(range.len(), async move {
+        let slice_estimated = if self.len > 0 {
+            usize::try_from(self.estimated_bytes as u128 * range.len() as u128 / self.len as u128)
+                .unwrap_or(usize::MAX)
+        } else {
+            0
+        };
+        Self::new(range.len(), slice_estimated, async move {
             let array = inner.await?;
             debug_assert!(range.end <= parent_len, "slice range out of bounds");
             let _ = parent_len;

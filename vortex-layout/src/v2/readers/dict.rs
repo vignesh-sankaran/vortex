@@ -102,6 +102,7 @@ impl Reader for DictReader {
             codes_stream,
             values_fut,
             expression: self.expression.clone(),
+            estimated_bytes_per_row: super::estimated_decoded_bytes(&self.dtype, 1),
         }))
     }
 
@@ -133,6 +134,7 @@ struct DictReaderStream {
     codes_stream: ReaderStreamRef,
     values_fut: Shared<BoxFuture<'static, SharedVortexResult<ArrayRef>>>,
     expression: Option<Expression>,
+    estimated_bytes_per_row: usize,
 }
 
 impl ReaderStream for DictReaderStream {
@@ -151,8 +153,9 @@ impl ReaderStream for DictReaderStream {
         let values_fut = self.values_fut.clone();
         let expression = self.expression.clone();
         let len = codes_future.len();
+        let estimated_bytes = len * self.estimated_bytes_per_row;
 
-        Ok(Some(ArrayFuture::new(len, async move {
+        Ok(Some(ArrayFuture::new(len, estimated_bytes, async move {
             let values = values_fut.await.map_err(|e| vortex_err!("{e}"))?;
             let codes = codes_future.await?;
             let mut array = DictArray::try_new(codes, values)?.into_array();

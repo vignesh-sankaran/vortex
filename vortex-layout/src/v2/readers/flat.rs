@@ -16,7 +16,6 @@ use vortex_array::expr::Expression;
 use vortex_array::expr::root;
 use vortex_array::expr::transform::replace;
 use vortex_array::serde::ArrayParts;
-use vortex_array::session::ArrayRegistry;
 use vortex_buffer::ByteBuffer;
 use vortex_dtype::DType;
 use vortex_error::SharedVortexResult;
@@ -24,6 +23,7 @@ use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_err;
 use vortex_error::vortex_panic;
+use vortex_session::VortexSession;
 
 use crate::segments::SegmentId;
 use crate::segments::SegmentSourceRef;
@@ -46,7 +46,7 @@ pub struct FlatReader {
     segment_id: SegmentId,
     segment_source: SegmentSourceRef,
     ctx: ArrayContext,
-    registry: ArrayRegistry,
+    session: VortexSession,
     expression: Option<Expression>,
 }
 
@@ -58,7 +58,7 @@ impl FlatReader {
         segment_id: SegmentId,
         segment_source: SegmentSourceRef,
         ctx: ArrayContext,
-        registry: ArrayRegistry,
+        session: VortexSession,
     ) -> Self {
         Self {
             len,
@@ -68,7 +68,7 @@ impl FlatReader {
             segment_id,
             segment_source,
             ctx,
-            registry,
+            session,
             expression: None,
         }
     }
@@ -101,7 +101,7 @@ impl Reader for FlatReader {
             segment_id: self.segment_id,
             segment_source: self.segment_source.clone(),
             ctx: self.ctx.clone(),
-            registry: self.registry.clone(),
+            session: self.session.clone(),
             expression: Some(new_expr),
         }))
     }
@@ -128,7 +128,7 @@ impl Reader for FlatReader {
         let decode_dtype = self.decode_dtype.clone();
         let row_count = self.len;
         let ctx = self.ctx.clone();
-        let registry = self.registry.clone();
+        let session = self.session.clone();
         let array_fut = async move {
             let segment = segment_source.request(segment_id).await?;
             let parts = if let Some(array_tree) = array_tree {
@@ -136,7 +136,7 @@ impl Reader for FlatReader {
             } else {
                 ArrayParts::try_from(segment)?
             };
-            parts.decode(&decode_dtype, row_count, &ctx, &registry)
+            parts.decode(&decode_dtype, row_count, &ctx, &session)
         }
         .map(|r| r.map_err(Arc::new))
         .boxed()
@@ -149,6 +149,7 @@ impl Reader for FlatReader {
             row_count: self.len,
             offset: start,
             remaining: end - start,
+            estimated_bytes_per_row: super::estimated_decoded_bytes(&self.dtype, 1),
         }))
     }
 
@@ -172,6 +173,7 @@ struct FlatReaderStream {
     row_count: usize,
     offset: usize,
     remaining: usize,
+    estimated_bytes_per_row: usize,
 }
 
 impl ReaderStream for FlatReaderStream {
@@ -197,11 +199,12 @@ impl ReaderStream for FlatReaderStream {
         let offset = self.offset;
         let len = self.remaining;
         let expression = self.expression.clone();
+        let estimated_bytes = len * self.estimated_bytes_per_row;
 
         self.offset += len;
         self.remaining = 0;
 
-        Ok(Some(ArrayFuture::new(len, async move {
+        Ok(Some(ArrayFuture::new(len, estimated_bytes, async move {
             // Await the shared array future (decoded once, shared across chunks).
             let mut array: ArrayRef = array_fut.await?;
 
