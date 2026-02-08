@@ -4,11 +4,13 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use kernel::PARENT_KERNELS;
 use vortex_dtype::DType;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
+use vortex_session::VortexSession;
 
 use crate::ArrayRef;
 use crate::EmptyMetadata;
@@ -23,6 +25,7 @@ use crate::vtable::VTable;
 use crate::vtable::ValidityVTableFromValidityHelper;
 
 mod array;
+mod kernel;
 mod operations;
 mod validity;
 mod visitor;
@@ -53,7 +56,12 @@ impl VTable for StructVTable {
         Ok(Some(vec![]))
     }
 
-    fn deserialize(_buffer: &[u8]) -> VortexResult<Self::Metadata> {
+    fn deserialize(
+        _bytes: &[u8],
+        _dtype: &DType,
+        _len: usize,
+        _session: &VortexSession,
+    ) -> VortexResult<Self::Metadata> {
         Ok(EmptyMetadata)
     }
 
@@ -137,6 +145,15 @@ impl VTable for StructVTable {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         PARENT_RULES.evaluate(array, parent, child_idx)
+    }
+
+    fn execute_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Option<ArrayRef>> {
+        PARENT_KERNELS.execute(array, parent, child_idx, ctx)
     }
 }
 

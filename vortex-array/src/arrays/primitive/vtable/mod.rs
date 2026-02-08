@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use kernel::PARENT_KERNELS;
 use vortex_dtype::DType;
 use vortex_dtype::PType;
 use vortex_error::VortexExpect;
@@ -20,11 +21,13 @@ use crate::vtable::VTable;
 use crate::vtable::ValidityVTableFromValidityHelper;
 
 mod array;
+mod kernel;
 mod operations;
 mod validity;
 mod visitor;
 
 use vortex_buffer::Alignment;
+use vortex_session::VortexSession;
 
 use crate::arrays::primitive::compute::rules::RULES;
 use crate::vtable::ArrayId;
@@ -53,7 +56,12 @@ impl VTable for PrimitiveVTable {
         Ok(Some(vec![]))
     }
 
-    fn deserialize(_buffer: &[u8]) -> VortexResult<Self::Metadata> {
+    fn deserialize(
+        _bytes: &[u8],
+        _dtype: &DType,
+        _len: usize,
+        _session: &VortexSession,
+    ) -> VortexResult<Self::Metadata> {
         Ok(EmptyMetadata)
     }
 
@@ -131,6 +139,15 @@ impl VTable for PrimitiveVTable {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         RULES.evaluate(array, parent, child_idx)
+    }
+
+    fn execute_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Option<ArrayRef>> {
+        PARENT_KERNELS.execute(array, parent, child_idx, ctx)
     }
 }
 

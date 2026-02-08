@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use kernel::PARENT_KERNELS;
 use vortex_buffer::Alignment;
 use vortex_dtype::DType;
 use vortex_dtype::NativeDecimalType;
@@ -10,6 +11,7 @@ use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
 use vortex_scalar::DecimalType;
+use vortex_session::VortexSession;
 
 use crate::ArrayRef;
 use crate::DeserializeMetadata;
@@ -25,6 +27,7 @@ use crate::vtable::VTable;
 use crate::vtable::ValidityVTableFromValidityHelper;
 
 mod array;
+mod kernel;
 mod operations;
 mod validity;
 mod visitor;
@@ -65,7 +68,12 @@ impl VTable for DecimalVTable {
         Ok(Some(metadata.serialize()))
     }
 
-    fn deserialize(bytes: &[u8]) -> VortexResult<Self::Metadata> {
+    fn deserialize(
+        bytes: &[u8],
+        _dtype: &DType,
+        _len: usize,
+        _session: &VortexSession,
+    ) -> VortexResult<Self::Metadata> {
         let metadata = ProstMetadata::<DecimalMetadata>::deserialize(bytes)?;
         Ok(ProstMetadata(metadata))
     }
@@ -137,6 +145,15 @@ impl VTable for DecimalVTable {
     ) -> VortexResult<Option<ArrayRef>> {
         RULES.evaluate(array, parent, child_idx)
     }
+
+    fn execute_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Option<ArrayRef>> {
+        PARENT_KERNELS.execute(array, parent, child_idx, ctx)
+    }
 }
 
 #[derive(Debug)]
@@ -154,11 +171,11 @@ mod tests {
 
     use crate::ArrayContext;
     use crate::IntoArray;
+    use crate::LEGACY_SESSION;
     use crate::arrays::DecimalArray;
     use crate::arrays::DecimalVTable;
     use crate::serde::ArrayParts;
     use crate::serde::SerializeOptions;
-    use crate::session::ArraySession;
     use crate::validity::Validity;
 
     #[test]
@@ -183,10 +200,8 @@ mod tests {
 
         let concat = concat.freeze();
 
-        let session = ArraySession::default();
-
         let parts = ArrayParts::try_from(concat).unwrap();
-        let decoded = parts.decode(&dtype, 5, &ctx, session.registry()).unwrap();
+        let decoded = parts.decode(&dtype, 5, &ctx, &LEGACY_SESSION).unwrap();
         assert!(decoded.is::<DecimalVTable>());
     }
 }

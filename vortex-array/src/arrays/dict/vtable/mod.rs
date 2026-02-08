@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use kernel::PARENT_KERNELS;
 use vortex_dtype::DType;
 use vortex_dtype::Nullability;
 use vortex_dtype::PType;
@@ -9,6 +10,7 @@ use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_err;
 use vortex_scalar::Scalar;
+use vortex_session::VortexSession;
 
 use super::DictArray;
 use super::DictMetadata;
@@ -30,6 +32,7 @@ use crate::vtable::ArrayId;
 use crate::vtable::VTable;
 
 mod array;
+mod kernel;
 mod operations;
 mod validity;
 mod visitor;
@@ -75,8 +78,13 @@ impl VTable for DictVTable {
         Ok(Some(metadata.serialize()))
     }
 
-    fn deserialize(buffer: &[u8]) -> VortexResult<Self::Metadata> {
-        let metadata = <Self::Metadata as DeserializeMetadata>::deserialize(buffer)?;
+    fn deserialize(
+        bytes: &[u8],
+        _dtype: &DType,
+        _len: usize,
+        _session: &VortexSession,
+    ) -> VortexResult<Self::Metadata> {
+        let metadata = <Self::Metadata as DeserializeMetadata>::deserialize(bytes)?;
         Ok(ProstMetadata(metadata))
     }
 
@@ -142,7 +150,7 @@ impl VTable for DictVTable {
         // TODO(ngates): if indices min is quite high, we could slice self and offset the indices
         //  such that canonicalize does less work.
 
-        Ok(take_canonical(values, &codes)?.into_array())
+        Ok(take_canonical(values, &codes, ctx)?.into_array())
     }
 
     fn reduce_parent(
@@ -151,6 +159,15 @@ impl VTable for DictVTable {
         child_idx: usize,
     ) -> VortexResult<Option<ArrayRef>> {
         PARENT_RULES.evaluate(array, parent, child_idx)
+    }
+
+    fn execute_parent(
+        array: &Self::Array,
+        parent: &ArrayRef,
+        child_idx: usize,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Option<ArrayRef>> {
+        PARENT_KERNELS.execute(array, parent, child_idx, ctx)
     }
 }
 

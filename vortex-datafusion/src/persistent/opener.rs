@@ -40,7 +40,8 @@ use vortex::file::OpenOptionsSessionExt;
 use vortex::io::InstrumentedReadAt;
 use vortex::io::session::RuntimeSessionExt;
 use vortex::layout::LayoutReader;
-use vortex::metrics::VortexMetrics;
+use vortex::metrics::Label;
+use vortex::metrics::MetricsRegistry;
 use vortex::scan::ScanBuilder;
 use vortex::scan::v2::scan::ScanBuilder2;
 use vortex::session::VortexSession;
@@ -53,11 +54,15 @@ use crate::convert::exprs::ExpressionConvertor;
 use crate::convert::exprs::ProcessedProjection;
 use crate::convert::exprs::make_vortex_predicate;
 use crate::convert::schema::calculate_physical_schema;
+use crate::metrics::PARTITION_LABEL;
+use crate::metrics::PATH_LABEL;
 use crate::persistent::cache::CachedVortexMetadata;
 use crate::persistent::stream::PrunableStream;
 
 #[derive(Clone)]
 pub(crate) struct VortexOpener {
+    /// The partition this opener is assigned to. Only used for labeling metrics.
+    pub partition: usize,
     pub session: VortexSession,
     pub vortex_reader_factory: Arc<dyn VortexReaderFactory>,
     /// Optional table schema projection. The indices are w.r.t. the `table_schema`, which is
@@ -79,7 +84,7 @@ pub(crate) struct VortexOpener {
     /// If provided, the scan will not return more than this many rows.
     pub limit: Option<u64>,
     /// A metrics object for tracking performance of the scan.
-    pub metrics: VortexMetrics,
+    pub metrics_registry: Arc<dyn MetricsRegistry>,
     /// A shared cache of file readers.
     ///
     /// To save on the overhead of reparsing FlatBuffers and rebuilding the layout tree, we cache
@@ -95,9 +100,11 @@ pub(crate) struct VortexOpener {
 impl FileOpener for VortexOpener {
     fn open(&self, file: PartitionedFile) -> DFResult<FileOpenFuture> {
         let session = self.session.clone();
-        let metrics = self
-            .metrics
-            .child_with_tags([("file_path", file.path().to_string())]);
+        let metrics_registry = self.metrics_registry.clone();
+        let labels = vec![
+            Label::new(PATH_LABEL, file.path().to_string()),
+            Label::new(PARTITION_LABEL, self.partition.to_string()),
+        ];
 
         let mut projection = self.projection.clone();
         let mut filter = self.filter.clone();
@@ -106,7 +113,8 @@ impl FileOpener for VortexOpener {
             .vortex_reader_factory
             .create_reader(file.path().as_ref(), &session)?;
 
-        let reader = InstrumentedReadAt::new(reader, &metrics);
+        let reader =
+            InstrumentedReadAt::new_with_labels(reader, metrics_registry.as_ref(), labels.clone());
 
         let file_pruning_predicate = self.file_pruning_predicate.clone();
         let expr_adapter_factory = self.expr_adapter_factory.clone();
@@ -172,7 +180,8 @@ impl FileOpener for VortexOpener {
             let mut open_opts = session
                 .open_options()
                 .with_file_size(file.object_meta.size)
-                .with_metrics(metrics.clone());
+                .with_metrics_registry(metrics_registry.clone())
+                .with_labels(labels);
 
             if let Some(file_metadata_cache) = file_metadata_cache
                 && let Some(file_metadata) = file_metadata_cache.get(&file.object_meta)
@@ -329,7 +338,7 @@ impl FileOpener for VortexOpener {
 
             let handle = session.handle().clone();
             let stream = scan_builder
-                // .with_metrics(metrics)
+                // .with_metrics_registry(metrics_registry)
                 .with_projection(scan_projection)
                 .with_some_filter(filter)
                 // .with_ordered(has_output_ordering)
@@ -457,6 +466,7 @@ mod tests {
     use vortex::file::WriteOptionsSessionExt;
     use vortex::io::ObjectStoreWriter;
     use vortex::io::VortexWrite;
+    use vortex::metrics::DefaultMetricsRegistry;
     use vortex::scan::Selection;
     use vortex::session::VortexSession;
 
@@ -533,6 +543,7 @@ mod tests {
         filter: Option<PhysicalExprRef>,
     ) -> VortexOpener {
         VortexOpener {
+            partition: 1,
             session: SESSION.clone(),
             vortex_reader_factory: Arc::new(DefaultVortexReaderFactory::new(object_store)),
             projection: ProjectionExprs::from_indices(&[0], table_schema.file_schema()),
@@ -542,7 +553,7 @@ mod tests {
             table_schema,
             batch_size: 100,
             limit: None,
-            metrics: Default::default(),
+            metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             layout_readers: Default::default(),
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
@@ -624,6 +635,7 @@ mod tests {
         )])));
 
         let make_opener = |filter| VortexOpener {
+            partition: 1,
             session: SESSION.clone(),
             vortex_reader_factory: Arc::new(DefaultVortexReaderFactory::new(object_store.clone())),
             projection: ProjectionExprs::from_indices(&[0], table_schema.file_schema()),
@@ -633,7 +645,7 @@ mod tests {
             table_schema: table_schema.clone(),
             batch_size: 100,
             limit: None,
-            metrics: Default::default(),
+            metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             layout_readers: Default::default(),
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
@@ -707,6 +719,7 @@ mod tests {
         ]));
 
         let opener = VortexOpener {
+            partition: 1,
             session: SESSION.clone(),
             vortex_reader_factory: Arc::new(DefaultVortexReaderFactory::new(object_store)),
             projection: ProjectionExprs::from_indices(&[0, 1, 2], &table_schema),
@@ -716,7 +729,7 @@ mod tests {
             table_schema: TableSchema::from_file_schema(table_schema.clone()),
             batch_size: 100,
             limit: None,
-            metrics: Default::default(),
+            metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             layout_readers: Default::default(),
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
@@ -856,6 +869,7 @@ mod tests {
         let projection = vec![0, 2];
 
         let opener = VortexOpener {
+            partition: 1,
             session: SESSION.clone(),
             vortex_reader_factory: Arc::new(DefaultVortexReaderFactory::new(object_store.clone())),
             projection: ProjectionExprs::from_indices(
@@ -868,7 +882,7 @@ mod tests {
             table_schema: table_schema.clone(),
             batch_size: 100,
             limit: None,
-            metrics: Default::default(),
+            metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             layout_readers: Default::default(),
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
@@ -915,6 +929,7 @@ mod tests {
         projection: ProjectionExprs,
     ) -> VortexOpener {
         VortexOpener {
+            partition: 1,
             session: SESSION.clone(),
             vortex_reader_factory: Arc::new(DefaultVortexReaderFactory::new(object_store)),
             projection,
@@ -924,7 +939,7 @@ mod tests {
             table_schema: TableSchema::from_file_schema(schema),
             batch_size: 100,
             limit: None,
-            metrics: Default::default(),
+            metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             layout_readers: Default::default(),
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
@@ -1113,6 +1128,7 @@ mod tests {
         )]);
 
         let opener = VortexOpener {
+            partition: 1,
             session: SESSION.clone(),
             vortex_reader_factory: Arc::new(DefaultVortexReaderFactory::new(object_store.clone())),
             projection,
@@ -1122,7 +1138,7 @@ mod tests {
             table_schema,
             batch_size: 100,
             limit: None,
-            metrics: Default::default(),
+            metrics_registry: Arc::new(DefaultMetricsRegistry::default()),
             layout_readers: Default::default(),
             has_output_ordering: false,
             expression_convertor: Arc::new(DefaultExpressionConvertor::default()),
