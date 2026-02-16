@@ -64,7 +64,7 @@ pub trait DynExtScalarVTable: 'static + Send + Sync + Debug {
     /// # Errors
     ///
     /// Returns an error if the storage value is not compatible with the extension type.
-    fn create_ext_scalar_value_ref(
+    fn build(
         &self,
         ext_dtype: ExtDTypeRef,
         storage: ScalarValue,
@@ -76,7 +76,7 @@ impl<V: ExtScalarVTable> DynExtScalarVTable for V {
         ExtDTypeVTable::id(self)
     }
 
-    fn create_ext_scalar_value_ref(
+    fn build(
         &self,
         ext_dtype: ExtDTypeRef,
         storage: ScalarValue,

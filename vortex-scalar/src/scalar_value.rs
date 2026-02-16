@@ -156,8 +156,7 @@ impl ScalarValue {
                 )
             })?;
 
-        let ext_value =
-            dyn_scalar_vtable.create_ext_scalar_value_ref(ext_dtype.clone(), storage_value)?;
+        let ext_value = dyn_scalar_vtable.build(ext_dtype.clone(), storage_value)?;
 
         Ok(ScalarValue::Extension(ext_value))
     }

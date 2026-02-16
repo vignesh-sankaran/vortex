@@ -183,10 +183,13 @@ impl Scalar {
     ///
     /// Panics if the storage dtype is incompatible with the extension type, or if the storage
     /// value fails validation.
-    pub fn extension<V: ExtScalarVTable + Default>(metadata: V::Metadata, value: Scalar) -> Self {
-        let ext_dtype = ExtDType::<V>::try_new(metadata, value.dtype().clone())
+    pub fn extension<V: ExtScalarVTable + Default>(
+        metadata: V::Metadata,
+        storage_scalar: Scalar,
+    ) -> Self {
+        let ext_dtype = ExtDType::<V>::try_new(metadata, storage_scalar.dtype().clone())
             .vortex_expect("Failed to create extension dtype");
-        let storage_value = value.into_value();
+        let storage_value = storage_scalar.into_value();
 
         let ext_value = storage_value.map(|sv| {
             let owned = ExtScalarValue::<V>::try_new(ext_dtype.clone(), sv)
@@ -201,10 +204,10 @@ impl Scalar {
     /// TODO docs.
     pub fn extension_ref(
         ext_dtype: ExtDTypeRef,
-        value: Scalar,
+        storage_scalar: Scalar,
         session: &VortexSession,
     ) -> VortexResult<Self> {
-        let (storage_dtype, storage_value) = value.into_parts();
+        let (storage_dtype, storage_value) = storage_scalar.into_parts();
         Self::extension_ref_from_value(ext_dtype, &storage_dtype, storage_value, session)
     }
 

@@ -50,7 +50,7 @@ use crate::extension::ExtScalarVTable;
 /// [`try_downcast`]: ExtScalarValueRef::try_downcast
 /// [`downcast`]: ExtScalarValueRef::downcast
 #[derive(Clone)]
-pub struct ExtScalarValueRef(Arc<dyn ExtScalarValueAdapterImpl>);
+pub struct ExtScalarValueRef(Arc<dyn DynExtScalarValue>);
 
 /// A typed extension scalar value, parameterized by a concrete [`ExtScalarVTable`].
 ///
@@ -80,7 +80,7 @@ struct ExtScalarValueAdapter<V: ExtScalarVTable> {
     storage: ScalarValue,
 }
 
-impl<V: ExtScalarVTable> ExtScalarValueAdapterImpl for ExtScalarValueAdapter<V> {
+impl<V: ExtScalarVTable> DynExtScalarValue for ExtScalarValueAdapter<V> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -262,19 +262,6 @@ impl<V: ExtScalarVTable> ExtScalarValue<V> {
         self.0.storage_value()
     }
 
-    /// Formats the extension scalar using the provided [`ExtDTypeRef`] for metadata context.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying [`fmt::Write`] operation fails.
-    pub fn fmt_ext_scalar(
-        &self,
-        ext_dtype: &ExtDTypeRef,
-        f: &mut fmt::Formatter<'_>,
-    ) -> fmt::Result {
-        self.0.fmt_ext_scalar(ext_dtype, f)
-    }
-
     // pub(crate) fn cast(&self, dtype: &DType) -> VortexResult<Scalar> {
     //     if self.value.is_none() && !dtype.is_nullable() {
     //         vortex_bail!(
@@ -361,7 +348,7 @@ mod sealed {
 /// [`ExtScalarValueAdapter`].
 ///
 /// [`ExtDTypeImpl`]: vortex_dtype::extension
-trait ExtScalarValueAdapterImpl: sealed::Sealed + 'static + Send + Sync {
+trait DynExtScalarValue: sealed::Sealed + 'static + Send + Sync {
     /// Returns `self` as a trait object for downcasting.
     fn as_any(&self) -> &dyn Any;
     /// Returns the [`ExtID`] identifying this extension type.

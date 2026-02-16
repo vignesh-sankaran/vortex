@@ -23,13 +23,13 @@ use crate::extension::Matcher;
 /// Extension types allow wrapping a storage type with custom semantics.
 #[derive(Debug, Clone)]
 pub struct ExtScalar<'a> {
-    /// The dtype reference TODO better docs.
+    /// The dtype reference..
     dtype: &'a DType,
 
-    /// The extension data type reference.
+    /// The extension dtype reference.
     ext_dtype: &'a ExtDTypeRef,
 
-    /// The underlying downcasted extension, or [`None`] if null.
+    /// The underlying erased extension value, or [`None`] if null.
     ext_value: Option<&'a ExtScalarValueRef>,
 }
 

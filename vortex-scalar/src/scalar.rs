@@ -10,6 +10,7 @@ use std::hash::Hasher;
 use vortex_dtype::DType;
 use vortex_dtype::NativeDType;
 use vortex_dtype::PType;
+use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
@@ -116,11 +117,14 @@ impl Scalar {
     /// The caller must ensure that the given [`DType`] and [`ScalarValue`] are compatible per the
     /// rules defined in [`Self::is_compatible`].
     pub unsafe fn new_unchecked(dtype: DType, value: Option<ScalarValue>) -> Self {
-        debug_assert!(
-            Self::is_compatible(&dtype, value.as_ref()),
-            "Incompatible dtype {dtype} with value {}",
-            value.map(|v| format!("{}", v)).unwrap_or_default()
-        );
+        #[cfg(debug_assertions)]
+        if let Err(e) = Self::validate(&dtype, value.as_ref()) {
+            let value_str = value
+                .as_ref()
+                .map(|v| format!("{}", v))
+                .unwrap_or_else(|| "none".to_string());
+            vortex_panic!("Incompatible dtype {dtype} with value {value_str}: {e}");
+        }
 
         Self { dtype, value }
     }
@@ -272,11 +276,6 @@ impl Scalar {
         }
 
         Ok(())
-    }
-
-    /// Check if the given [`ScalarValue`] is compatible with the given [`DType`].
-    pub fn is_compatible(dtype: &DType, value: Option<&ScalarValue>) -> bool {
-        Self::validate(dtype, value).is_ok()
     }
 
     /// Check if two scalars are equal, ignoring nullability of the [`DType`].
