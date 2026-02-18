@@ -935,7 +935,7 @@ fn test_decimal_scalar_precision_overflow() {
 }
 
 #[test]
-fn test_decimal_scalar_rsub_and_rdiv() {
+fn test_decimal_scalar_reverse_sub_and_div() {
     use crate::scalar::NumericOperator;
 
     let decimal1 = Scalar::decimal(
@@ -952,18 +952,18 @@ fn test_decimal_scalar_rsub_and_rdiv() {
     );
     let scalar2 = decimal2.as_decimal();
 
-    // RSub: 300 - 100 = 200
-    let result = scalar1
-        .checked_binary_numeric(&scalar2, NumericOperator::RSub)
+    // Reverse sub: swap operands, 300 - 100 = 200
+    let result = scalar2
+        .checked_binary_numeric(&scalar1, NumericOperator::Sub)
         .unwrap();
     assert_eq!(
         result.decimal_value(),
         Some(DecimalValue::I256(i256::from_i128(200)))
     );
 
-    // RDiv: 300 / 100 = 3
-    let result = scalar1
-        .checked_binary_numeric(&scalar2, NumericOperator::RDiv)
+    // Reverse div: swap operands, 300 / 100 = 3
+    let result = scalar2
+        .checked_binary_numeric(&scalar1, NumericOperator::Div)
         .unwrap();
     assert_eq!(
         result.decimal_value(),

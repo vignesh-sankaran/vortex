@@ -30,6 +30,7 @@ pub use list_contains::*;
 pub use mask::*;
 pub use min_max::*;
 pub use nan_count::*;
+#[allow(deprecated)]
 pub use numeric::*;
 use parking_lot::RwLock;
 pub use sum::*;

@@ -18,10 +18,8 @@
 //!
 //! - Addition (`+`)
 //! - Subtraction (`-`)
-//! - Reverse Subtraction (scalar - array)
 //! - Multiplication (`*`)
 //! - Division (`/`)
-//! - Reverse Division (scalar / array)
 
 use itertools::Itertools;
 use num_traits::Num;
@@ -37,7 +35,8 @@ use crate::ArrayRef;
 use crate::IntoArray;
 use crate::ToCanonical;
 use crate::arrays::ConstantArray;
-use crate::compute::numeric::numeric;
+use crate::expr::Operator;
+use crate::expr::execute_numeric;
 use crate::scalar::NumericOperator;
 use crate::scalar::PrimitiveScalar;
 use crate::scalar::Scalar;
@@ -102,18 +101,14 @@ where
         .cast(array.dtype())
         .vortex_expect("operation should succeed in conformance test");
 
-    let operators: [NumericOperator; 6] = [
-        NumericOperator::Add,
-        NumericOperator::Sub,
-        NumericOperator::RSub,
-        NumericOperator::Mul,
-        NumericOperator::Div,
-        NumericOperator::RDiv,
-    ];
+    let operators: [Operator; 4] = [Operator::Add, Operator::Sub, Operator::Mul, Operator::Div];
 
     for operator in operators {
+        let scalar_op = NumericOperator::try_from(operator)
+            .vortex_expect("all operators in list should be numeric");
+
         // Test array operator scalar (e.g., array + 1)
-        let result = numeric(
+        let result = execute_numeric(
             &array,
             &ConstantArray::new(scalar_one.clone(), array.len()).into_array(),
             operator,
@@ -132,7 +127,7 @@ where
             .iter()
             .map(|x| {
                 x.as_primitive()
-                    .checked_binary_numeric(&scalar_one.as_primitive(), operator)
+                    .checked_binary_numeric(&scalar_one.as_primitive(), scalar_op)
                     .map(<Scalar as From<PrimitiveScalar<'_>>>::from)
             })
             .collect();
@@ -152,8 +147,8 @@ where
             }
         }
 
-        // Test scalar operator array (e.g., 1 + array)
-        let result = numeric(
+        // Test scalar operator array (e.g., 1 + array) — swap operands
+        let result = execute_numeric(
             &ConstantArray::new(scalar_one.clone(), array.len()).into_array(),
             &array,
             operator,
@@ -172,7 +167,7 @@ where
             .map(|x| {
                 scalar_one
                     .as_primitive()
-                    .checked_binary_numeric(&x.as_primitive(), operator)
+                    .checked_binary_numeric(&x.as_primitive(), scalar_op)
                     .map(<Scalar as From<PrimitiveScalar<'_>>>::from)
             })
             .collect();
@@ -338,26 +333,17 @@ where
     // Only test operators that make sense for the given scalar
     let operators = if scalar_value == T::zero() {
         // Skip division by zero
-        vec![
-            NumericOperator::Add,
-            NumericOperator::Sub,
-            NumericOperator::RSub,
-            NumericOperator::Mul,
-        ]
+        vec![Operator::Add, Operator::Sub, Operator::Mul]
     } else {
-        vec![
-            NumericOperator::Add,
-            NumericOperator::Sub,
-            NumericOperator::RSub,
-            NumericOperator::Mul,
-            NumericOperator::Div,
-            NumericOperator::RDiv,
-        ]
+        vec![Operator::Add, Operator::Sub, Operator::Mul, Operator::Div]
     };
 
     for operator in operators {
+        let scalar_op = NumericOperator::try_from(operator)
+            .vortex_expect("all operators in list should be numeric");
+
         // Test array operator scalar
-        let result = numeric(
+        let result = execute_numeric(
             &array,
             &ConstantArray::new(scalar.clone(), array.len()).into_array(),
             operator,
@@ -376,7 +362,7 @@ where
             .iter()
             .map(|x| {
                 x.as_primitive()
-                    .checked_binary_numeric(&scalar.as_primitive(), operator)
+                    .checked_binary_numeric(&scalar.as_primitive(), scalar_op)
                     .map(<Scalar as From<PrimitiveScalar<'_>>>::from)
             })
             .collect();

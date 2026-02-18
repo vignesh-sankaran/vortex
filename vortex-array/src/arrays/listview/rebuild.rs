@@ -15,6 +15,11 @@ use crate::ToCanonical;
 use crate::arrays::ListViewArray;
 use crate::builders::builder_with_capacity;
 use crate::compute;
+use crate::expr::Operator;
+use crate::expr::checked_sub;
+use crate::expr::execute_numeric;
+use crate::expr::lit;
+use crate::expr::root;
 use crate::scalar::Scalar;
 use crate::vtable::ValidityHelper;
 
@@ -211,7 +216,7 @@ impl ListViewArray {
             last_offset + last_size
         } else {
             let min_max = compute::min_max(
-                &compute::add(self.offsets(), self.sizes())
+                &execute_numeric(self.offsets(), self.sizes(), Operator::Add)
                     .vortex_expect("`offsets + sizes` somehow overflowed"),
             )
             .vortex_expect("Something went wrong while computing min and max")
@@ -229,7 +234,8 @@ impl ListViewArray {
                 .vortex_expect("unable to convert the min offset `start` into a `usize`");
             let scalar = Scalar::primitive(offset, Nullability::NonNullable);
 
-            compute::sub_scalar(self.offsets(), scalar)
+            self.offsets()
+                .apply(&checked_sub(root(), lit(scalar)))
                 .vortex_expect("was somehow unable to adjust offsets down by their minimum")
         });
 

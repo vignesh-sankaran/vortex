@@ -5,8 +5,13 @@
 
 use std::fmt;
 
+use vortex_error::VortexResult;
+use vortex_error::vortex_bail;
+
+use crate::expr::Operator;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Binary element-wise operations on two arrays or two scalars.
+/// Binary element-wise operations on two arrays or of two scalars.
 pub enum NumericOperator {
     /// Binary element-wise addition of two arrays or of two scalars.
     ///
@@ -14,14 +19,10 @@ pub enum NumericOperator {
     Add,
     /// Binary element-wise subtraction of two arrays or of two scalars.
     Sub,
-    /// Same as [NumericOperator::Sub] but with the parameters flipped: `right - left`.
-    RSub,
     /// Binary element-wise multiplication of two arrays or of two scalars.
     Mul,
     /// Binary element-wise division of two arrays or of two scalars.
     Div,
-    /// Same as [NumericOperator::Div] but with the parameters flipped: `right / left`.
-    RDiv,
     // Missing from arrow-rs:
     // Min,
     // Max,
@@ -34,16 +35,27 @@ impl fmt::Display for NumericOperator {
     }
 }
 
-impl NumericOperator {
-    /// Returns the operator with swapped operands (e.g., Sub becomes RSub).
-    pub fn swap(self) -> Self {
-        match self {
-            NumericOperator::Add => NumericOperator::Add,
-            NumericOperator::Sub => NumericOperator::RSub,
-            NumericOperator::RSub => NumericOperator::Sub,
-            NumericOperator::Mul => NumericOperator::Mul,
-            NumericOperator::Div => NumericOperator::RDiv,
-            NumericOperator::RDiv => NumericOperator::Div,
+impl TryFrom<Operator> for NumericOperator {
+    type Error = vortex_error::VortexError;
+
+    fn try_from(op: Operator) -> VortexResult<Self> {
+        match op {
+            Operator::Add => Ok(NumericOperator::Add),
+            Operator::Sub => Ok(NumericOperator::Sub),
+            Operator::Mul => Ok(NumericOperator::Mul),
+            Operator::Div => Ok(NumericOperator::Div),
+            other => vortex_bail!("unsupported numeric operator: {}", other),
+        }
+    }
+}
+
+impl From<NumericOperator> for Operator {
+    fn from(op: NumericOperator) -> Self {
+        match op {
+            NumericOperator::Add => Operator::Add,
+            NumericOperator::Sub => Operator::Sub,
+            NumericOperator::Mul => Operator::Mul,
+            NumericOperator::Div => Operator::Div,
         }
     }
 }

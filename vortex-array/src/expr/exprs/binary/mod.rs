@@ -125,10 +125,10 @@ impl VTable for Binary {
             Operator::Gte => execute_compare(lhs, rhs, compute::Operator::Gte),
             Operator::And => execute_boolean(lhs, rhs, BooleanOperator::AndKleene),
             Operator::Or => execute_boolean(lhs, rhs, BooleanOperator::OrKleene),
-            Operator::Add => execute_numeric(lhs, rhs, crate::scalar::NumericOperator::Add),
-            Operator::Sub => execute_numeric(lhs, rhs, crate::scalar::NumericOperator::Sub),
-            Operator::Mul => execute_numeric(lhs, rhs, crate::scalar::NumericOperator::Mul),
-            Operator::Div => execute_numeric(lhs, rhs, crate::scalar::NumericOperator::Div),
+            Operator::Add => execute_numeric(lhs, rhs, Operator::Add),
+            Operator::Sub => execute_numeric(lhs, rhs, Operator::Sub),
+            Operator::Mul => execute_numeric(lhs, rhs, Operator::Mul),
+            Operator::Div => execute_numeric(lhs, rhs, Operator::Div),
         }
     }
 
@@ -553,6 +553,84 @@ pub fn checked_add(lhs: Expression, rhs: Expression) -> Expression {
     Binary
         .try_new_expr(Operator::Add, [lhs, rhs])
         .vortex_expect("Failed to create Add binary expression")
+}
+
+/// Create a new [`Binary`] using the [`Sub`](crate::expr::exprs::operators::Operator::Sub) operator.
+///
+/// ## Example usage
+///
+/// ```
+/// # use vortex_array::{Array, IntoArray};
+/// # use vortex_array::arrow::IntoArrowArray as _;
+/// # use vortex_buffer::buffer;
+/// # use vortex_array::expr::{checked_sub, lit, root};
+/// let xs = buffer![6, 7, 8].into_array();
+/// let result = xs.apply(&checked_sub(root(), lit(5))).unwrap();
+///
+/// assert_eq!(
+///     &result.into_arrow_preferred().unwrap(),
+///     &buffer![1, 2, 3]
+///         .into_array()
+///         .into_arrow_preferred()
+///         .unwrap()
+/// );
+/// ```
+pub fn checked_sub(lhs: Expression, rhs: Expression) -> Expression {
+    Binary
+        .try_new_expr(Operator::Sub, [lhs, rhs])
+        .vortex_expect("Failed to create Sub binary expression")
+}
+
+/// Create a new [`Binary`] using the [`Mul`](crate::expr::exprs::operators::Operator::Mul) operator.
+///
+/// ## Example usage
+///
+/// ```
+/// # use vortex_array::{Array, IntoArray};
+/// # use vortex_array::arrow::IntoArrowArray as _;
+/// # use vortex_buffer::buffer;
+/// # use vortex_array::expr::{checked_mul, lit, root};
+/// let xs = buffer![1, 2, 3].into_array();
+/// let result = xs.apply(&checked_mul(root(), lit(5))).unwrap();
+///
+/// assert_eq!(
+///     &result.into_arrow_preferred().unwrap(),
+///     &buffer![5, 10, 15]
+///         .into_array()
+///         .into_arrow_preferred()
+///         .unwrap()
+/// );
+/// ```
+pub fn checked_mul(lhs: Expression, rhs: Expression) -> Expression {
+    Binary
+        .try_new_expr(Operator::Mul, [lhs, rhs])
+        .vortex_expect("Failed to create Mul binary expression")
+}
+
+/// Create a new [`Binary`] using the [`Div`](crate::expr::exprs::operators::Operator::Div) operator.
+///
+/// ## Example usage
+///
+/// ```
+/// # use vortex_array::{Array, IntoArray};
+/// # use vortex_array::arrow::IntoArrowArray as _;
+/// # use vortex_buffer::buffer;
+/// # use vortex_array::expr::{checked_div, lit, root};
+/// let xs = buffer![10, 20, 30].into_array();
+/// let result = xs.apply(&checked_div(root(), lit(5))).unwrap();
+///
+/// assert_eq!(
+///     &result.into_arrow_preferred().unwrap(),
+///     &buffer![2, 4, 6]
+///         .into_array()
+///         .into_arrow_preferred()
+///         .unwrap()
+/// );
+/// ```
+pub fn checked_div(lhs: Expression, rhs: Expression) -> Expression {
+    Binary
+        .try_new_expr(Operator::Div, [lhs, rhs])
+        .vortex_expect("Failed to create Div binary expression")
 }
 
 #[cfg(test)]

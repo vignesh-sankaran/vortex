@@ -23,7 +23,9 @@ use vortex_array::builtins::ArrayBuiltins;
 use vortex_array::compute::Operator;
 use vortex_array::compute::compare;
 use vortex_array::compute::filter;
-use vortex_array::compute::sub_scalar;
+use vortex_array::expr::checked_sub;
+use vortex_array::expr::lit;
+use vortex_array::expr::root;
 use vortex_array::patches::Patches;
 use vortex_array::patches::PatchesMetadata;
 use vortex_array::scalar::Scalar;
@@ -272,7 +274,9 @@ impl SparseArray {
     pub fn resolved_patches(&self) -> VortexResult<Patches> {
         let patches = self.patches();
         let indices_offset = Scalar::from(patches.offset()).cast(patches.indices().dtype())?;
-        let indices = sub_scalar(patches.indices(), indices_offset)?;
+        let indices = patches
+            .indices()
+            .apply(&checked_sub(root(), lit(indices_offset)))?;
 
         Patches::new(
             patches.array_len(),

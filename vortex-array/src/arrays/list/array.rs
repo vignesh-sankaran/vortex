@@ -20,7 +20,9 @@ use crate::IntoArray;
 use crate::arrays::ListVTable;
 use crate::arrays::PrimitiveVTable;
 use crate::compute::min_max;
-use crate::compute::sub_scalar;
+use crate::expr::checked_sub;
+use crate::expr::lit;
+use crate::expr::root;
 use crate::stats::ArrayStats;
 use crate::validity::Validity;
 
@@ -321,7 +323,7 @@ impl ListArray {
 
         let offsets = self.offsets();
         let first_offset = offsets.scalar_at(0)?;
-        let adjusted_offsets = sub_scalar(offsets, first_offset)?;
+        let adjusted_offsets = offsets.apply(&checked_sub(root(), lit(first_offset)))?;
 
         Self::try_new(elements, adjusted_offsets, self.validity.clone())
     }

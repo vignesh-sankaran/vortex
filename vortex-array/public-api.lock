@@ -6574,10 +6574,6 @@ impl vortex_array::compute::Options for vortex_array::expr::BetweenOptions
 
 pub fn vortex_array::expr::BetweenOptions::as_any(&self) -> &dyn core::any::Any
 
-impl vortex_array::compute::Options for vortex_array::scalar::NumericOperator
-
-pub fn vortex_array::scalar::NumericOperator::as_any(&self) -> &dyn core::any::Any
-
 pub trait vortex_array::compute::SumKernel: vortex_array::vtable::VTable
 
 pub fn vortex_array::compute::SumKernel::sum(&self, array: &Self::Array, accumulator: &vortex_array::scalar::Scalar) -> vortex_error::VortexResult<vortex_array::scalar::Scalar>
@@ -7874,6 +7870,10 @@ impl core::convert::From<vortex_array::expr::Operator> for vortex_proto::expr::b
 
 pub fn vortex_proto::expr::binary_opts::BinaryOp::from(value: vortex_array::expr::Operator) -> Self
 
+impl core::convert::From<vortex_array::scalar::NumericOperator> for vortex_array::expr::Operator
+
+pub fn vortex_array::expr::Operator::from(op: vortex_array::scalar::NumericOperator) -> Self
+
 impl core::convert::From<vortex_proto::expr::binary_opts::BinaryOp> for vortex_array::expr::Operator
 
 pub fn vortex_array::expr::Operator::from(value: vortex_proto::expr::binary_opts::BinaryOp) -> Self
@@ -7889,6 +7889,12 @@ impl core::convert::TryFrom<vortex_array::compute::BooleanOperator> for vortex_a
 pub type vortex_array::expr::Operator::Error = vortex_error::VortexError
 
 pub fn vortex_array::expr::Operator::try_from(value: vortex_array::compute::BooleanOperator) -> vortex_error::VortexResult<Self>
+
+impl core::convert::TryFrom<vortex_array::expr::Operator> for vortex_array::scalar::NumericOperator
+
+pub type vortex_array::scalar::NumericOperator::Error = vortex_error::VortexError
+
+pub fn vortex_array::scalar::NumericOperator::try_from(op: vortex_array::expr::Operator) -> vortex_error::VortexResult<Self>
 
 impl core::convert::TryInto<vortex_array::compute::Operator> for vortex_array::expr::Operator
 
@@ -10024,6 +10030,12 @@ pub fn vortex_array::expr::cast(child: vortex_array::expr::Expression, target: v
 
 pub fn vortex_array::expr::checked_add(lhs: vortex_array::expr::Expression, rhs: vortex_array::expr::Expression) -> vortex_array::expr::Expression
 
+pub fn vortex_array::expr::checked_div(lhs: vortex_array::expr::Expression, rhs: vortex_array::expr::Expression) -> vortex_array::expr::Expression
+
+pub fn vortex_array::expr::checked_mul(lhs: vortex_array::expr::Expression, rhs: vortex_array::expr::Expression) -> vortex_array::expr::Expression
+
+pub fn vortex_array::expr::checked_sub(lhs: vortex_array::expr::Expression, rhs: vortex_array::expr::Expression) -> vortex_array::expr::Expression
+
 pub fn vortex_array::expr::col(field: impl core::convert::Into<vortex_dtype::field_names::FieldName>) -> vortex_array::expr::Expression
 
 pub fn vortex_array::expr::descendent_annotations<A: vortex_array::expr::AnnotationFn>(expr: &vortex_array::expr::Expression, annotate: A) -> vortex_array::expr::Annotations<'_, <A as vortex_array::expr::AnnotationFn>::Annotation>
@@ -10762,15 +10774,7 @@ pub vortex_array::scalar::NumericOperator::Div
 
 pub vortex_array::scalar::NumericOperator::Mul
 
-pub vortex_array::scalar::NumericOperator::RDiv
-
-pub vortex_array::scalar::NumericOperator::RSub
-
 pub vortex_array::scalar::NumericOperator::Sub
-
-impl vortex_array::scalar::NumericOperator
-
-pub fn vortex_array::scalar::NumericOperator::swap(self) -> Self
 
 impl core::clone::Clone for vortex_array::scalar::NumericOperator
 
@@ -10781,6 +10785,16 @@ impl core::cmp::Eq for vortex_array::scalar::NumericOperator
 impl core::cmp::PartialEq for vortex_array::scalar::NumericOperator
 
 pub fn vortex_array::scalar::NumericOperator::eq(&self, other: &vortex_array::scalar::NumericOperator) -> bool
+
+impl core::convert::From<vortex_array::scalar::NumericOperator> for vortex_array::expr::Operator
+
+pub fn vortex_array::expr::Operator::from(op: vortex_array::scalar::NumericOperator) -> Self
+
+impl core::convert::TryFrom<vortex_array::expr::Operator> for vortex_array::scalar::NumericOperator
+
+pub type vortex_array::scalar::NumericOperator::Error = vortex_error::VortexError
+
+pub fn vortex_array::scalar::NumericOperator::try_from(op: vortex_array::expr::Operator) -> vortex_error::VortexResult<Self>
 
 impl core::fmt::Debug for vortex_array::scalar::NumericOperator
 
@@ -10793,10 +10807,6 @@ pub fn vortex_array::scalar::NumericOperator::fmt(&self, f: &mut core::fmt::Form
 impl core::marker::Copy for vortex_array::scalar::NumericOperator
 
 impl core::marker::StructuralPartialEq for vortex_array::scalar::NumericOperator
-
-impl vortex_array::compute::Options for vortex_array::scalar::NumericOperator
-
-pub fn vortex_array::scalar::NumericOperator::as_any(&self) -> &dyn core::any::Any
 
 pub enum vortex_array::scalar::PValue
 
