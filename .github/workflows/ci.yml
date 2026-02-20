@@ -131,7 +131,7 @@ jobs:
 
   python-wheel-build:
     name: "Python (wheel build)"
-    runs-on: ubuntu-latest
+    runs-on: shipfox-2vcpu-ubuntu-2404
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
@@ -776,7 +776,7 @@ jobs:
 
   wasm-integration:
     name: "wasm-integration"
-    runs-on: ubuntu-latest
+    runs-on: shipfox-2vcpu-ubuntu-2404
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
@@ -793,7 +793,7 @@ jobs:
 
   miri:
     name: "Rust tests (miri)"
-    runs-on: ubuntu-latest
+    runs-on: shipfox-2vcpu-ubuntu-2404
     timeout-minutes: 120
     env:
       MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation -Zmiri-env-forward=RUST_BACKTRACE
@@ -814,7 +814,7 @@ jobs:
 
   generated-files:
     name: "Check generated source files are up to date"
-    runs-on: ubuntu-latest
+    runs-on: shipfox-2vcpu-ubuntu-2404
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
@@ -855,8 +855,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { os: ubuntu, runs-on: "ubuntu-24.04-arm", target: aarch64-unknown-linux-gnu }
-          - { os: ubuntu, runs-on: "ubuntu-24.04", target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu, runs-on: "shipfox-2vcpu-ubuntu-2404-arm", target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu, runs-on: "shipfox-2vcpu-ubuntu-2404", target: x86_64-unknown-linux-gnu }
     steps:
       - uses: actions/checkout@v6
         with:
